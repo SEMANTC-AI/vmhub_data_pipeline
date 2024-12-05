@@ -3,6 +3,8 @@ import requests
 from typing import Dict, List, Optional, Union
 import structlog
 from urllib.parse import quote
+import time
+from random import uniform
 
 logger = structlog.get_logger()
 
@@ -13,81 +15,110 @@ class VMHubAPIError(Exception):
 class VMHubClient:
     """Client for interacting with VMHub API."""
     
-    def __init__(self, base_url: str, api_key: str):
+    def __init__(
+        self, 
+        base_url: str, 
+        api_key: str,
+        max_retries: int = 3,
+        initial_backoff: float = 1.0,
+        max_backoff: float = 32.0,
+        backoff_factor: float = 2.0
+    ):
         """
         Initialize VMHub client.
         
         Args:
             base_url: Base URL for VMHub API
             api_key: API key for authentication
+            max_retries: Maximum number of retry attempts
+            initial_backoff: Initial backoff time in seconds
+            max_backoff: Maximum backoff time in seconds
+            backoff_factor: Multiplication factor for exponential backoff
         """
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
+        self.max_retries = max_retries
+        self.initial_backoff = initial_backoff
+        self.max_backoff = max_backoff
+        self.backoff_factor = backoff_factor
+        
         self.session = requests.Session()
         self.session.headers.update({
             'accept': 'application/json',
             'x-api-key': self.api_key
         })
     
-    def _make_request(
+    def _make_request_with_backoff(
         self, 
         method: str, 
         endpoint: str, 
         params: Optional[Dict] = None
     ) -> Union[List[Dict], Dict]:
         """
-        Make HTTP request to VMHub API.
-        
-        Args:
-            method: HTTP method (GET, POST, etc.)
-            endpoint: API endpoint
-            params: Query parameters
-            
-        Returns:
-            API response data
-            
-        Raises:
-            VMHubAPIError: If API request fails
+        Make HTTP request with exponential backoff retry logic.
         """
         url = f"{self.base_url}/{endpoint}"
-        
-        try:
-            response = self.session.request(
-                method=method,
-                url=url,
-                params=params
-            )
-            
-            # Raise for HTTP errors
-            response.raise_for_status()
-            
-            return response.json()
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(
-                "VMHub API request failed",
-                error=str(e),
-                url=url,
-                method=method,
-                params=params
-            )
-            raise VMHubAPIError(f"API request failed: {str(e)}")
-        
-        except ValueError as e:
-            logger.error(
-                "Failed to parse VMHub API response",
-                error=str(e),
-                url=url,
-                method=method,
-                params=params
-            )
-            raise VMHubAPIError(f"Failed to parse API response: {str(e)}")
+        current_retry = 0
+        current_backoff = self.initial_backoff
+
+        while current_retry <= self.max_retries:
+            try:
+                response = self.session.request(
+                    method=method,
+                    url=url,
+                    params=params
+                )
+                
+                # If successful, return immediately
+                response.raise_for_status()
+                return response.json()
+                
+            except requests.exceptions.RequestException as e:
+                current_retry += 1
+                
+                # If it's the last retry, raise the error
+                if current_retry > self.max_retries:
+                    logger.error(
+                        "VMHub API request failed after all retries",
+                        error=str(e),
+                        url=url,
+                        method=method,
+                        params=params,
+                        retry_count=current_retry
+                    )
+                    raise VMHubAPIError(f"API request failed after {self.max_retries} retries: {str(e)}")
+                
+                # If it's a 500 error on the last page, it might mean no more data
+                if (
+                    isinstance(e, requests.exceptions.HTTPError) 
+                    and e.response.status_code == 500 
+                    and params 
+                    and params.get('pagina', 0) > 0
+                ):
+                    raise VMHubAPIError(f"API request failed: {str(e)}")
+                
+                # Add jitter to backoff
+                jitter = uniform(0, 0.1 * current_backoff)
+                sleep_time = min(current_backoff + jitter, self.max_backoff)
+                
+                logger.warning(
+                    "Request failed, retrying",
+                    error=str(e),
+                    retry_number=current_retry,
+                    backoff_time=sleep_time,
+                    url=url,
+                    method=method,
+                    params=params
+                )
+                
+                time.sleep(sleep_time)
+                current_backoff *= self.backoff_factor
     
     def get_clients(
         self, 
         cnpj: str, 
         page: int = 0, 
-        page_size: int = 10
+        page_size: int = 100
     ) -> List[Dict]:
         """
         Fetch clients from VMHub API.
@@ -95,17 +126,13 @@ class VMHubClient:
         Args:
             cnpj: Company CNPJ
             page: Page number (0-based)
-            page_size: Number of records per page (max 1000)
+            page_size: Number of records per page (max 100)
             
         Returns:
             List of client records
-            
-        Raises:
-            VMHubAPIError: If API request fails
-            ValueError: If page_size > 1000
         """
-        if page_size > 1000:
-            raise ValueError("page_size cannot exceed 1000")
+        if page_size > 100:
+            raise ValueError("page_size cannot exceed 100")
         
         # URL encode CNPJ
         encoded_cnpj = quote(cnpj)
@@ -117,7 +144,7 @@ class VMHubClient:
         }
         
         try:
-            response_data = self._make_request(
+            response_data = self._make_request_with_backoff(
                 method='GET',
                 endpoint='clientes',
                 params=params

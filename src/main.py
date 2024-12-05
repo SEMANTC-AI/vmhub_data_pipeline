@@ -3,14 +3,17 @@ from datetime import datetime
 import pytz
 from dotenv import load_dotenv
 from pathlib import Path
+import structlog
 
-from api.vmhub_client import VMHubClient
-from utils.gcs_helper import GCSHelper
-from utils.bigquery_helper import BigQueryHelper
-from config.settings import Settings
+from src.api.vmhub_client import VMHubClient, VMHubAPIError
+from src.utils.gcs_helper import GCSHelper
+from src.utils.bigquery_helper import BigQueryHelper
+from src.config.settings import Settings
 
 # Load environment variables
 load_dotenv()
+
+logger = structlog.get_logger()
 
 def format_cnpj(cnpj: str) -> str:
     """Remove special characters from CNPJ."""
@@ -46,42 +49,49 @@ def main():
             dataset_id=f"CNPJ_{formatted_cnpj}_RAW"
         )
 
-        # Process pages
         page = 0
-        while True:
-            # Fetch data from VMHub
-            data = vmhub_client.get_clients(
-                cnpj=settings.VMHUB_CNPJ,
-                page=page,
-                page_size=1000
-            )
-            
-            # Break if no more data
-            if not data:
-                break
+        has_more_data = True
+
+        while has_more_data:
+            try:
+                # Fetch data from VMHub
+                data = vmhub_client.get_clients(
+                    cnpj=settings.VMHUB_CNPJ,
+                    page=page,
+                    page_size=100
+                )
                 
-            # Generate storage path
-            storage_path = get_storage_path(
-                cnpj=formatted_cnpj,
-                endpoint='clientes',
-                page=page
-            )
-            
-            # Upload to GCS
-            gcs_helper.upload_json(
-                data=data,
-                blob_name=storage_path
-            )
-            
-            # Load to BigQuery
-            bq_helper.load_json(
-              data=data,
-              table_id='clientes',
-              schema=settings.get_schema('clientes')
-            )
-            
-            # Increment page
-            page += 1
+                # If no data returned, break the loop
+                if not data:
+                    logger.info("No more data to fetch", page=page)
+                    break
+                    
+                # Generate storage path
+                storage_path = get_storage_path(
+                    cnpj=formatted_cnpj,
+                    endpoint='clientes',
+                    page=page
+                )
+                
+                # Upload to GCS
+                gcs_helper.upload_json(
+                    data=data,
+                    blob_name=storage_path
+                )
+                
+                # Load to BigQuery
+                bq_helper.load_json(
+                    data=data,
+                    table_id='clientes',
+                    schema=settings.get_schema('clientes')
+                )
+                
+                # Increment page
+                page += 1
+                
+            except VMHubAPIError as e:
+                logger.info("No more pages to fetch", error=str(e), page=page)
+                has_more_data = False
 
     except Exception as e:
         logger.error("Error in main execution", error=str(e))
