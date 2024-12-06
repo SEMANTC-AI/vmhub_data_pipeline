@@ -4,6 +4,7 @@ import pytz
 from dotenv import load_dotenv
 from pathlib import Path
 import structlog
+import time
 
 from src.api.vmhub_client import VMHubClient, VMHubAPIError
 from src.utils.gcs_helper import GCSHelper
@@ -38,7 +39,9 @@ def main():
         # Initialize clients
         vmhub_client = VMHubClient(
             base_url=settings.VMHUB_BASE_URL,
-            api_key=settings.VMHUB_API_KEY
+            api_key=settings.VMHUB_API_KEY,
+            max_retries=3,
+            initial_backoff=2.0
         )
         gcs_helper = GCSHelper(
             project_id=settings.GCP_PROJECT_ID,
@@ -50,20 +53,22 @@ def main():
         )
 
         page = 0
-        has_more_data = True
+        all_data = []
+        consecutive_failures = 0
+        max_consecutive_failures = 3
 
-        while has_more_data:
+        # First phase: Load all to GCS
+        while consecutive_failures < max_consecutive_failures:
             try:
                 # Fetch data from VMHub
                 data = vmhub_client.get_clients(
                     cnpj=settings.VMHUB_CNPJ,
                     page=page,
-                    page_size=100
+                    page_size=10
                 )
                 
-                # If no data returned, break the loop
                 if not data:
-                    logger.info("No more data to fetch", page=page)
+                    logger.info("No data in page", page=page)
                     break
                     
                 # Generate storage path
@@ -79,19 +84,45 @@ def main():
                     blob_name=storage_path
                 )
                 
-                # Load to BigQuery
-                bq_helper.load_json(
-                    data=data,
-                    table_id='clientes',
-                    schema=settings.get_schema('clientes')
-                )
+                # Add to collected data
+                all_data.extend(data)
                 
-                # Increment page
+                # Reset failures counter and increment page
+                consecutive_failures = 0
                 page += 1
                 
+                # Add small delay between requests
+                time.sleep(0.5)
+                
             except VMHubAPIError as e:
-                logger.info("No more pages to fetch", error=str(e), page=page)
-                has_more_data = False
+                consecutive_failures += 1
+                logger.warning(
+                    "Failed to fetch page", 
+                    error=str(e), 
+                    page=page
+                )
+                page += 1  # Try next page on failure
+
+        # Second phase: Single BigQuery load
+        if all_data:
+            logger.info(
+                "Starting BigQuery load",
+                total_records=len(all_data)
+            )
+            
+            bq_helper.load_json(
+                data=all_data,
+                table_id='clientes',
+                schema=settings.get_schema('clientes')
+            )
+            
+            logger.info(
+                "Finished processing",
+                total_pages=page,
+                total_records=len(all_data)
+            )
+        else:
+            logger.warning("No data collected to load into BigQuery")
 
     except Exception as e:
         logger.error("Error in main execution", error=str(e))

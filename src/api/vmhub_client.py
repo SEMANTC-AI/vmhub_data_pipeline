@@ -118,7 +118,7 @@ class VMHubClient:
         self, 
         cnpj: str, 
         page: int = 0, 
-        page_size: int = 100
+        page_size: int = 10
     ) -> List[Dict]:
         """
         Fetch clients from VMHub API.
@@ -126,13 +126,13 @@ class VMHubClient:
         Args:
             cnpj: Company CNPJ
             page: Page number (0-based)
-            page_size: Number of records per page (max 100)
+            page_size: Number of records per page (max 10)
             
         Returns:
             List of client records
         """
-        if page_size > 100:
-            raise ValueError("page_size cannot exceed 100")
+        if page_size > 10:
+            raise ValueError("page_size cannot exceed 10")
         
         # URL encode CNPJ
         encoded_cnpj = quote(cnpj)
