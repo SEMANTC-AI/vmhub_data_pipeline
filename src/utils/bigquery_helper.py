@@ -1,9 +1,12 @@
 # src/utils/bigquery_helper.py
+
 import json
 import io
 from typing import Dict, List, Union
 from google.cloud import bigquery
 import structlog
+from datetime import datetime
+import pytz
 
 logger = structlog.get_logger()
 
@@ -61,20 +64,26 @@ class BigQueryHelper:
         data: List[Dict], 
         table_id: str, 
         schema: List[Dict],
+        gcs_uri: str,
         write_disposition: str = 'WRITE_APPEND'
     ) -> None:
-        """Load JSON data into BigQuery table with deduplication."""
+        """Load JSON data into BigQuery table with deduplication and metadata."""
         try:
             # Get existing IDs
             existing_ids = self.get_existing_ids(table_id)
             
-            # Filter out records with existing IDs
-            new_records = [
-                record for record in data 
-                if record.get('id') not in existing_ids
-            ]
+            # Add metadata and filter out existing records
+            enriched_records = []
+            for record in data:
+                if record.get('id') not in existing_ids:
+                    record.update({
+                        'gcs_uri': gcs_uri,
+                        'ingestion_timestamp': datetime.now(pytz.UTC).isoformat(),
+                        'source_system': 'VMHUB'
+                    })
+                    enriched_records.append(record)
             
-            if not new_records:
+            if not enriched_records:
                 logger.info(
                     "No new records to insert",
                     table_id=table_id
@@ -85,7 +94,7 @@ class BigQueryHelper:
                 "Found new records to insert",
                 table_id=table_id,
                 total_records=len(data),
-                new_records=len(new_records)
+                new_records=len(enriched_records)
             )
 
             # Configure job
@@ -102,7 +111,7 @@ class BigQueryHelper:
             )
 
             # Convert filtered data to newline-delimited JSON
-            nl_json = '\n'.join(json.dumps(record) for record in new_records)
+            nl_json = '\n'.join(json.dumps(record) for record in enriched_records)
 
             # Load data
             table_ref = f"{self.project_id}.{self.dataset_id}.{table_id}"
@@ -116,7 +125,7 @@ class BigQueryHelper:
             logger.info(
                 "Successfully loaded new data into BigQuery",
                 table_id=table_id,
-                row_count=len(new_records)
+                row_count=len(enriched_records)
             )
 
         except Exception as e:

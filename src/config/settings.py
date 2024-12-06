@@ -1,3 +1,5 @@
+# src/config/settings.py
+
 import os
 import json
 from dataclasses import dataclass

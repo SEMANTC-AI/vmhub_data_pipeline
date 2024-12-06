@@ -1,4 +1,5 @@
 # src/api/vmhub_client.py
+
 import requests
 from typing import Dict, List, Optional, Union
 import structlog
@@ -113,28 +114,18 @@ class VMHubClient:
                 
                 time.sleep(sleep_time)
                 current_backoff *= self.backoff_factor
-    
-    def get_clients(
+
+    def get_data(
         self, 
+        endpoint: str,
         cnpj: str, 
         page: int = 0, 
         page_size: int = 10
     ) -> List[Dict]:
-        """
-        Fetch clients from VMHub API.
-        
-        Args:
-            cnpj: Company CNPJ
-            page: Page number (0-based)
-            page_size: Number of records per page (max 10)
-            
-        Returns:
-            List of client records
-        """
+        """Generic method to fetch data from any endpoint."""
         if page_size > 10:
             raise ValueError("page_size cannot exceed 10")
         
-        # URL encode CNPJ
         encoded_cnpj = quote(cnpj)
         
         params = {
@@ -146,19 +137,16 @@ class VMHubClient:
         try:
             response_data = self._make_request_with_backoff(
                 method='GET',
-                endpoint='clientes',
+                endpoint=endpoint,
                 params=params
             )
             
             if not isinstance(response_data, list):
-                logger.error(
-                    "Unexpected response format",
-                    response_data=response_data
-                )
                 raise VMHubAPIError("Unexpected response format")
                 
             logger.info(
-                "Successfully fetched clients",
+                "Successfully fetched data",
+                endpoint=endpoint,
                 cnpj=cnpj,
                 page=page,
                 record_count=len(response_data)
@@ -168,10 +156,10 @@ class VMHubClient:
             
         except VMHubAPIError:
             logger.error(
-                "Failed to fetch clients",
+                "Failed to fetch data",
+                endpoint=endpoint,
                 cnpj=cnpj,
-                page=page,
-                page_size=page_size
+                page=page
             )
             raise
 

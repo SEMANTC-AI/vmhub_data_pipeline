@@ -1,5 +1,6 @@
 # src/utils/__init__.py
-"""Utility modules for GCS and BigQuery operations."""
+
+"""UTILITY MODULES FOR GCS AND BIGQUERY OPERATIONS"""
 
 from .gcs_helper import GCSHelper
 from .bigquery_helper import BigQueryHelper
