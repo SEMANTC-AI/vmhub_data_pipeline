@@ -12,7 +12,6 @@ RUN apt-get update && \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create directories
 RUN mkdir -p credentials schemas
 
 COPY requirements.txt .

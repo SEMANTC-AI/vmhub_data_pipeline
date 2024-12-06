@@ -35,7 +35,7 @@ ENV/
 
 # GCP
 *.json
-!schema/*.json
+# !schema/*.json
 
 # Logs
 *.log

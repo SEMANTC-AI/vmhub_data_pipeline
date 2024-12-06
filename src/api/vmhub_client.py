@@ -6,6 +6,7 @@ import structlog
 from urllib.parse import quote
 import time
 from random import uniform
+from datetime import datetime
 
 logger = structlog.get_logger()
 
@@ -25,17 +26,6 @@ class VMHubClient:
         max_backoff: float = 32.0,
         backoff_factor: float = 2.0
     ):
-        """
-        Initialize VMHub client.
-        
-        Args:
-            base_url: Base URL for VMHub API
-            api_key: API key for authentication
-            max_retries: Maximum number of retry attempts
-            initial_backoff: Initial backoff time in seconds
-            max_backoff: Maximum backoff time in seconds
-            backoff_factor: Multiplication factor for exponential backoff
-        """
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.max_retries = max_retries
@@ -55,9 +45,7 @@ class VMHubClient:
         endpoint: str, 
         params: Optional[Dict] = None
     ) -> Union[List[Dict], Dict]:
-        """
-        Make HTTP request with exponential backoff retry logic.
-        """
+        """Make HTTP request with exponential backoff retry logic."""
         url = f"{self.base_url}/{endpoint}"
         current_retry = 0
         current_backoff = self.initial_backoff
@@ -120,11 +108,16 @@ class VMHubClient:
         endpoint: str,
         cnpj: str, 
         page: int = 0, 
-        page_size: int = 10
+        page_size: int = 10,
+        date_start: Optional[datetime] = None,
+        date_end: Optional[datetime] = None,
+        somente_sucesso: bool = True
     ) -> List[Dict]:
         """Generic method to fetch data from any endpoint."""
-        if page_size > 10:
-            raise ValueError("page_size cannot exceed 10")
+        if endpoint == 'clientes' and page_size > 10:
+            raise ValueError("page_size cannot exceed 10 for clientes endpoint")
+        if endpoint == 'vendas' and page_size > 1000:
+            raise ValueError("page_size cannot exceed 1000 for vendas endpoint")
         
         encoded_cnpj = quote(cnpj)
         
@@ -133,6 +126,14 @@ class VMHubClient:
             'pagina': page,
             'quantidade': page_size
         }
+        
+        # Add date range parameters if provided
+        if date_start and date_end:
+            params.update({
+                'dataInicio': date_start.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'dataTermino': date_end.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'somenteSucesso': str(somente_sucesso).lower()
+            })
         
         try:
             response_data = self._make_request_with_backoff(
@@ -149,7 +150,9 @@ class VMHubClient:
                 endpoint=endpoint,
                 cnpj=cnpj,
                 page=page,
-                record_count=len(response_data)
+                record_count=len(response_data),
+                date_start=date_start.isoformat() if date_start else None,
+                date_end=date_end.isoformat() if date_end else None
             )
             
             return response_data
@@ -159,7 +162,9 @@ class VMHubClient:
                 "Failed to fetch data",
                 endpoint=endpoint,
                 cnpj=cnpj,
-                page=page
+                page=page,
+                date_start=date_start.isoformat() if date_start else None,
+                date_end=date_end.isoformat() if date_end else None
             )
             raise
 
