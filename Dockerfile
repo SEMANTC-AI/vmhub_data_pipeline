@@ -12,14 +12,14 @@ RUN apt-get update && \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Create necessary directories
 RUN mkdir -p credentials schemas
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy source code and schemas
 COPY src/ ./src/
 COPY schemas/ ./schemas/
-
-ENV $(cat .env | xargs)
 
 CMD ["python", "-m", "src.main"]
