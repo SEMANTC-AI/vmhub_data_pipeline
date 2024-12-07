@@ -2,7 +2,7 @@
 
 import os
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, List
 from pathlib import Path
 import json
 
@@ -30,14 +30,14 @@ class Settings:
             'GCP_PROJECT_ID',
             'GCS_BUCKET_NAME'
         ]
-        
         missing = [var for var in required_vars if not getattr(self, var)]
         if missing:
             raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
-    def load_external_config(self, endpoint_name: str) -> Dict:
-        config_path = Path(__file__).parent.parent.parent / 'schemas' / f'{endpoint_name}_external.json'
-        if not config_path.exists():
-            raise ValueError(f"External config not found for endpoint: {endpoint_name}")
-        with open(config_path) as f:
-            return json.load(f)
+    def get_schema(self, endpoint: str) -> List[Dict]:
+        schema_path = Path(__file__).parent.parent.parent / 'schemas' / f'{endpoint}.json'
+        if not schema_path.exists():
+            raise ValueError(f"Schema file not found for endpoint: {endpoint}")
+        with open(schema_path) as f:
+            schema_data = json.load(f)
+            return schema_data['schema']

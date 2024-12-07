@@ -23,6 +23,40 @@ class BigQueryHelper:
             self.client.create_dataset(dataset, exists_ok=True)
             logger.info("Created BigQuery dataset", dataset_id=self.dataset_id)
 
+    def load_data_from_gcs(self, table_id: str, schema: List[Dict], source_uri: str):
+        """Load data from GCS into BigQuery table."""
+        full_table_id = f"{self.project_id}.{self.dataset_id}.{table_id}"
+
+        # Convert JSON schema to BigQuery SchemaField list
+        bq_schema = []
+        for field in schema:
+            bq_schema.append(self._create_schema_field(field))
+
+        job_config = bigquery.LoadJobConfig(
+            source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+            schema=bq_schema,
+            write_disposition="WRITE_APPEND",  # or WRITE_TRUNCATE based on need
+            ignore_unknown_values=True
+        )
+
+        load_job = self.client.load_table_from_uri(
+            source_uri,
+            full_table_id,
+            job_config=job_config
+        )
+
+        result = load_job.result()
+        if load_job.errors:
+            logger.error("Failed to load data to BigQuery", errors=load_job.errors)
+            raise Exception(f"Load job failed: {load_job.errors}")
+
+        logger.info(
+            "Successfully loaded data to BigQuery",
+            table_id=full_table_id,
+            input_files=len(load_job.input_files),
+            input_bytes=load_job.input_file_bytes
+        )
+
     def _create_schema_field(self, field_def: Dict) -> bigquery.SchemaField:
         field_name = field_def['name']
         field_type = field_def['type']
@@ -33,42 +67,3 @@ class BigQueryHelper:
             return bigquery.SchemaField(name=field_name, field_type=field_type, mode=field_mode, fields=sub_fields)
         else:
             return bigquery.SchemaField(name=field_name, field_type=field_type, mode=field_mode)
-
-    def create_or_update_external_table(
-        self,
-        table_config: Dict,
-        external_config: Dict,
-        schema: List[Dict],
-        bucket_name: str,
-        cnpj: str
-    ) -> None:
-        try:
-            table_id = f"{self.project_id}.{self.dataset_id}.{table_config['table_id']}"
-            
-            schema_fields = [self._create_schema_field(field) for field in schema]
-
-            ext_config = bigquery.ExternalConfig(
-                source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON
-            )
-
-            source_uris = [uri.format(bucket=bucket_name, cnpj=cnpj) for uri in external_config['source_uris']]
-            ext_config.source_uris = source_uris
-            logger.info("Configuring external source", source_uris=source_uris)
-
-            ext_config.ignore_unknown_values = external_config.get('ignore_unknown_values', True)
-            ext_config.max_bad_records = external_config.get('max_bad_records', 0)
-            ext_config.autodetect = False
-
-            table = bigquery.Table(table_id, schema=schema_fields)
-            table.external_data_configuration = ext_config
-
-            self.client.create_table(table, exists_ok=True)
-            logger.info("Successfully created/updated external table", table_id=table_id)
-
-        except Exception as e:
-            logger.error(
-                "Failed to create external table",
-                error=str(e),
-                table_id=table_config.get('table_id')
-            )
-            raise

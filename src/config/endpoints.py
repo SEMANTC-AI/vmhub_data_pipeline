@@ -19,7 +19,6 @@ class Endpoint:
     def get_date_ranges(self) -> List[tuple]:
         if not self.requires_date_range or not self.max_date_range_days:
             return []
-            
         ranges = []
         end_date = datetime.now(pytz.UTC)
         start_date = end_date - timedelta(days=self.historical_days or 1000)

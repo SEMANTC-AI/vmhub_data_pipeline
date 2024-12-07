@@ -2,7 +2,6 @@
 
 import structlog
 
-# configure structured logging
 structlog.configure(
     processors=[
         structlog.processors.TimeStamper(fmt="iso"),
