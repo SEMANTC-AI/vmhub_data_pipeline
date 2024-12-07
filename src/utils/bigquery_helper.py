@@ -21,40 +21,7 @@ class BigQueryHelper:
             dataset = bigquery.Dataset(dataset_ref)
             dataset.location = "US"
             self.client.create_dataset(dataset, exists_ok=True)
-            logger.info("created BigQuery dataset", dataset_id=self.dataset_id)
-
-    def load_data_from_gcs(self, table_id: str, schema: List[Dict], source_uri: str):
-        full_table_id = f"{self.project_id}.{self.dataset_id}.{table_id}"
-
-        bq_schema = []
-        for field in schema:
-            bq_schema.append(self._create_schema_field(field))
-
-        job_config = bigquery.LoadJobConfig(
-            source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
-            schema=bq_schema,
-            write_disposition="WRITE_TRUNCATE",
-            ignore_unknown_values=True
-        )
-
-        load_job = self.client.load_table_from_uri(
-            source_uri,
-            full_table_id,
-            job_config=job_config
-        )
-
-        result = load_job.result()
-        if load_job.errors:
-            logger.error("Failed to load data to BigQuery", errors=load_job.errors)
-            raise Exception(f"Load job failed: {load_job.errors}")
-
-        # note: input_files and input_file_bytes are integers, no need to use len()
-        logger.info(
-            "successfully loaded data to BigQuery",
-            table_id=full_table_id,
-            input_files=load_job.input_files,
-            input_bytes=load_job.input_file_bytes
-        )
+            logger.info("Created BigQuery dataset", dataset_id=self.dataset_id)
 
     def _create_schema_field(self, field_def: Dict) -> bigquery.SchemaField:
         field_name = field_def['name']
@@ -66,3 +33,58 @@ class BigQueryHelper:
             return bigquery.SchemaField(name=field_name, field_type=field_type, mode=field_mode, fields=sub_fields)
         else:
             return bigquery.SchemaField(name=field_name, field_type=field_type, mode=field_mode)
+
+    def load_data_from_gcs(self, table_id: str, schema: List[Dict], source_uris: List[str]):
+        """Load data from GCS files into BigQuery table."""
+        try:
+            full_table_id = f"{self.project_id}.{self.dataset_id}.{table_id}"
+            
+            # Create schema
+            bq_schema = [self._create_schema_field(field) for field in schema]
+            
+            job_config = bigquery.LoadJobConfig(
+                source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+                schema=bq_schema,
+                write_disposition="WRITE_TRUNCATE",
+                ignore_unknown_values=True
+            )
+
+            # Log the URIs we're loading from
+            logger.info(
+                "Starting BigQuery load",
+                table_id=full_table_id,
+                source_uris=source_uris
+            )
+
+            load_job = self.client.load_table_from_uri(
+                source_uris,
+                full_table_id,
+                job_config=job_config
+            )
+
+            # Wait for job completion
+            load_job.result()
+
+            if load_job.errors:
+                logger.error(
+                    "BigQuery load job failed",
+                    errors=load_job.errors,
+                    table_id=full_table_id
+                )
+                raise Exception(f"Load job failed: {load_job.errors}")
+
+            logger.info(
+                "Successfully loaded data to BigQuery",
+                table_id=full_table_id,
+                input_files=load_job.input_files,
+                input_bytes=load_job.input_file_bytes,
+                output_rows=load_job.output_rows
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to load data to BigQuery",
+                error=str(e),
+                table_id=table_id
+            )
+            raise
