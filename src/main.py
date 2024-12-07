@@ -107,8 +107,8 @@ def process_endpoint(
     bq_helper: BigQueryHelper,
     formatted_cnpj: str
 ) -> None:
-    """Process a single endpoint day by day."""
-    logger.info("Processing endpoint", endpoint=endpoint.name)
+    """process a single endpoint day by day"""
+    logger.info("processing endpoint", endpoint=endpoint.name)
     any_data_processed = False
 
     if endpoint.requires_date_range:
@@ -139,14 +139,14 @@ def process_endpoint(
                 
             except Exception as e:
                 logger.error(
-                    "Error processing date",
+                    "error processing date",
                     endpoint=endpoint.name,
                     date=start_date.date().isoformat(),
                     error=str(e)
                 )
                 continue
         
-        # After all days are processed, load everything to BigQuery
+        # after all days are processed, load everything to BigQuery
         if any_data_processed:
             # Get all files for this endpoint
             prefix = f"CNPJ_{formatted_cnpj}/{endpoint.name}/"
@@ -154,7 +154,7 @@ def process_endpoint(
             
             if source_uris:
                 logger.info(
-                    "Loading all files to BigQuery",
+                    "loading all files to BigQuery",
                     endpoint=endpoint.name,
                     file_count=len(source_uris)
                 )
@@ -166,11 +166,11 @@ def process_endpoint(
                 )
             else:
                 logger.warning(
-                    "No files found for loading",
+                    "no files found for loading",
                     endpoint=endpoint.name
                 )
     else:
-        # Non-date-range endpoint processing (like clientes)
+        # non-date-range endpoint processing (like clientes)
         process_pages_for_date_range(
             endpoint=endpoint,
             settings=settings,

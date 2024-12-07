@@ -50,6 +50,20 @@ class VMHubEndpoints:
         start_date=datetime(2023, 3, 1, tzinfo=pytz.UTC),
         end_date=datetime.now(pytz.UTC)
     )
+
+    MAQUINAS = Endpoint(
+        name='maquinas',
+        path='maquinas',
+        page_size=1000,
+        schema_file='maquinas.json'
+    )
+
+    LAVANDERIAS = Endpoint(
+        name='lavanderias',
+        path='lavanderias',
+        page_size=1000,  # Can be large as there are typically few lavanderias
+        schema_file='lavanderias.json'
+    )
     
     @classmethod
     def get_all(cls) -> List[Endpoint]:

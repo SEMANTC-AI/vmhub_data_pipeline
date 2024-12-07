@@ -21,7 +21,7 @@ class BigQueryHelper:
             dataset = bigquery.Dataset(dataset_ref)
             dataset.location = "US"
             self.client.create_dataset(dataset, exists_ok=True)
-            logger.info("Created BigQuery dataset", dataset_id=self.dataset_id)
+            logger.info("created BigQuery dataset", dataset_id=self.dataset_id)
 
     def _create_schema_field(self, field_def: Dict) -> bigquery.SchemaField:
         field_name = field_def['name']
@@ -35,7 +35,7 @@ class BigQueryHelper:
             return bigquery.SchemaField(name=field_name, field_type=field_type, mode=field_mode)
 
     def load_data_from_gcs(self, table_id: str, schema: List[Dict], source_uris: List[str]):
-        """Load data from GCS files into BigQuery table."""
+        """load data from GCS files into BigQuery table."""
         try:
             full_table_id = f"{self.project_id}.{self.dataset_id}.{table_id}"
             
@@ -51,7 +51,7 @@ class BigQueryHelper:
 
             # Log the URIs we're loading from
             logger.info(
-                "Starting BigQuery load",
+                "starting BigQuery load",
                 table_id=full_table_id,
                 source_uris=source_uris
             )
@@ -74,7 +74,7 @@ class BigQueryHelper:
                 raise Exception(f"Load job failed: {load_job.errors}")
 
             logger.info(
-                "Successfully loaded data to BigQuery",
+                "successfully loaded data to BigQuery",
                 table_id=full_table_id,
                 input_files=load_job.input_files,
                 input_bytes=load_job.input_file_bytes,
@@ -83,7 +83,7 @@ class BigQueryHelper:
 
         except Exception as e:
             logger.error(
-                "Failed to load data to BigQuery",
+                "failed to load data to BigQuery",
                 error=str(e),
                 table_id=table_id
             )

@@ -26,13 +26,13 @@ class GCSHelper:
                 location="US"
             )
             logger.info(
-                "Created GCS bucket",
+                "created GCS bucket",
                 bucket_name=self.bucket_name
             )
         return bucket
 
     def upload_json(self, data: Union[List, Dict], blob_name: str) -> str:
-        """Upload JSON data to GCS in newline-delimited format."""
+        """upload JSON data to GCS in newline-delimited format."""
         try:
             # Convert each record to newline-delimited JSON
             if isinstance(data, list):
@@ -48,7 +48,7 @@ class GCSHelper:
             
             uri = f"gs://{self.bucket_name}/{blob_name}"
             logger.info(
-                "Successfully uploaded data to GCS",
+                "successfully uploaded data to GCS",
                 uri=uri,
                 size=blob.size
             )
@@ -56,7 +56,7 @@ class GCSHelper:
             
         except Exception as e:
             logger.error(
-                "Failed to upload to GCS",
+                "failed to upload to GCS",
                 error=str(e),
                 blob_name=blob_name
             )
@@ -69,34 +69,34 @@ class GCSHelper:
             data = json.loads(content)
             
             logger.info(
-                "Successfully downloaded data from GCS",
+                "successfully downloaded data from GCS",
                 blob_name=blob_name
             )
             return data
             
         except Exception as e:
             logger.error(
-                "Failed to download from GCS",
+                "failed to download from GCS",
                 error=str(e),
                 blob_name=blob_name
             )
             raise
 
     def list_blobs_with_prefix(self, prefix: str) -> List[str]:
-        """List all blob names with given prefix."""
+        """list all blob names with given prefix."""
         try:
             blobs = self.client.list_blobs(self.bucket, prefix=prefix)
             return [blob.name for blob in blobs]
         except Exception as e:
             logger.error(
-                "Failed to list blobs",
+                "failed to list blobs",
                 error=str(e),
                 prefix=prefix
             )
             raise
 
     def files_exist(self, prefix: str, pattern: str) -> bool:
-        """Check if files exist matching pattern under prefix."""
+        """check if files exist matching pattern under prefix."""
         try:
             blobs = self.bucket.list_blobs(prefix=prefix)
             for blob in blobs:
@@ -111,14 +111,14 @@ class GCSHelper:
                     return True
             
             logger.warning(
-                "No matching files found",
+                "no matching files found",
                 prefix=prefix,
                 pattern=pattern
             )
             return False
         except Exception as e:
             logger.error(
-                "Error checking files existence",
+                "error checking files existence",
                 error=str(e),
                 prefix=prefix,
                 pattern=pattern
@@ -126,19 +126,19 @@ class GCSHelper:
             raise
 
     def get_all_file_uris(self, prefix: str) -> List[str]:
-        """Get all file URIs under a prefix."""
+        """get all file URIs under a prefix."""
         try:
             blobs = self.bucket.list_blobs(prefix=prefix)
             uris = [f"gs://{self.bucket_name}/{blob.name}" for blob in blobs]
             logger.info(
-                "Retrieved file URIs",
+                "retrieved file URIs",
                 prefix=prefix,
                 file_count=len(uris)
             )
             return uris
         except Exception as e:
             logger.error(
-                "Failed to get file URIs",
+                "failed to get file URIs",
                 error=str(e),
                 prefix=prefix
             )

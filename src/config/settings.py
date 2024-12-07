@@ -32,12 +32,12 @@ class Settings:
         ]
         missing = [var for var in required_vars if not getattr(self, var)]
         if missing:
-            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+            raise ValueError(f"missing required environment variables: {', '.join(missing)}")
 
     def get_schema(self, endpoint: str) -> List[Dict]:
         schema_path = Path(__file__).parent.parent.parent / 'schemas' / f'{endpoint}.json'
         if not schema_path.exists():
-            raise ValueError(f"Schema file not found for endpoint: {endpoint}")
+            raise ValueError(f"schema file not found for endpoint: {endpoint}")
         with open(schema_path) as f:
             schema_data = json.load(f)
             return schema_data['schema']
