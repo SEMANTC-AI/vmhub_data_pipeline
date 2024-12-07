@@ -20,15 +20,22 @@ class GCSHelper:
             return self.client.get_bucket(self.bucket_name)
         except exceptions.NotFound:
             bucket = self.client.create_bucket(self.bucket_name, location="US")
-            logger.info("Created GCS bucket", bucket_name=self.bucket_name)
+            logger.info("created GCS bucket", bucket_name=self.bucket_name)
             return bucket
 
     def upload_json(self, data: Union[List, Dict], blob_name: str) -> str:
         try:
+            if isinstance(data, list):
+                # Convert the list of dicts into NDJSON
+                ndjson_str = "\n".join(json.dumps(record, ensure_ascii=False) for record in data)
+            else:
+                # Single dict, just dump as is (one line)
+                ndjson_str = json.dumps(data, ensure_ascii=False)
+
             blob = self.bucket.blob(blob_name)
-            blob.upload_from_string(json.dumps(data, ensure_ascii=False), content_type='application/json')
+            blob.upload_from_string(ndjson_str, content_type='application/json')
             uri = f"gs://{self.bucket_name}/{blob_name}"
-            logger.info("Uploaded data to GCS", uri=uri, size=blob.size)
+            # logger.info("Uploaded data to GCS", uri=uri, size=blob.size)
             return uri
         except Exception as e:
             logger.error("Failed to upload to GCS", error=str(e), blob_name=blob_name)

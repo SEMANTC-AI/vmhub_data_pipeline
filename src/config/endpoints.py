@@ -21,7 +21,7 @@ class Endpoint:
             return []
         ranges = []
         end_date = datetime.now(pytz.UTC)
-        start_date = end_date - timedelta(days=self.historical_days or 1000)
+        start_date = end_date - timedelta(days=self.historical_days or 100)
         
         current_start = start_date
         while current_start < end_date:
@@ -42,11 +42,11 @@ class VMHubEndpoints:
     VENDAS = Endpoint(
         name='vendas',
         path='vendas',
-        page_size=1000,
+        page_size=100,
         schema_file='vendas.json',
         requires_date_range=True,
         max_date_range_days=90,
-        historical_days=1000
+        historical_days=1095
     )
     
     @classmethod

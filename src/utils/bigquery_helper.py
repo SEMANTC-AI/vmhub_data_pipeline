@@ -21,13 +21,11 @@ class BigQueryHelper:
             dataset = bigquery.Dataset(dataset_ref)
             dataset.location = "US"
             self.client.create_dataset(dataset, exists_ok=True)
-            logger.info("Created BigQuery dataset", dataset_id=self.dataset_id)
+            logger.info("created BigQuery dataset", dataset_id=self.dataset_id)
 
     def load_data_from_gcs(self, table_id: str, schema: List[Dict], source_uri: str):
-        """Load data from GCS into BigQuery table."""
         full_table_id = f"{self.project_id}.{self.dataset_id}.{table_id}"
 
-        # Convert JSON schema to BigQuery SchemaField list
         bq_schema = []
         for field in schema:
             bq_schema.append(self._create_schema_field(field))
@@ -35,7 +33,7 @@ class BigQueryHelper:
         job_config = bigquery.LoadJobConfig(
             source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
             schema=bq_schema,
-            write_disposition="WRITE_APPEND",  # or WRITE_TRUNCATE based on need
+            write_disposition="WRITE_TRUNCATE",
             ignore_unknown_values=True
         )
 
@@ -50,10 +48,11 @@ class BigQueryHelper:
             logger.error("Failed to load data to BigQuery", errors=load_job.errors)
             raise Exception(f"Load job failed: {load_job.errors}")
 
+        # note: input_files and input_file_bytes are integers, no need to use len()
         logger.info(
-            "Successfully loaded data to BigQuery",
+            "successfully loaded data to BigQuery",
             table_id=full_table_id,
-            input_files=len(load_job.input_files),
+            input_files=load_job.input_files,
             input_bytes=load_job.input_file_bytes
         )
 

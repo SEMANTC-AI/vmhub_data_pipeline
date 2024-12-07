@@ -8,7 +8,7 @@ import structlog
 import time
 from typing import Optional, List, Dict
 
-from src.api.vmhub_client import VMHubClient, VMHubAPIError
+from src.api.vmhub_client import VMHubClient, VMHubAPIError, NoMoreDataError
 from src.utils.gcs_helper import GCSHelper
 from src.utils.bigquery_helper import BigQueryHelper
 from src.config.settings import Settings
@@ -21,7 +21,6 @@ def format_cnpj(cnpj: str) -> str:
     return cnpj.replace('.', '').replace('/', '').replace('-', '')
 
 def get_storage_path(cnpj: str, endpoint: str, page: int) -> str:
-    # e.g. gs://{bucket}/CNPJ_{cnpj}/{endpoint}/response_pg0.json
     return f"CNPJ_{cnpj}/{endpoint}/response_pg{page}.json"
 
 def enrich_data(records: List[Dict], gcs_uri: str) -> List[Dict]:
@@ -44,6 +43,7 @@ def process_date_range(
     page = 0
     consecutive_failures = 0
     max_consecutive_failures = 3
+    fetched_any_data = False  # Track if we fetched any data successfully
 
     while consecutive_failures < max_consecutive_failures:
         try:
@@ -55,19 +55,26 @@ def process_date_range(
                 date_start=start_date,
                 date_end=end_date
             )
+
             if not data:
-                logger.info("No more data returned", page=page, endpoint=endpoint.name)
+                # no data returned from api (normal scenario)
+                logger.info("no more data returned", page=page, endpoint=endpoint.name)
                 break
 
+            fetched_any_data = True
             storage_path = get_storage_path(cnpj=formatted_cnpj, endpoint=endpoint.name, page=page)
             gcs_uri = f"gs://{settings.GCS_BUCKET_NAME}/{storage_path}"
-
             enriched_data = enrich_data(data, gcs_uri=gcs_uri)
             gcs_helper.upload_json(data=enriched_data, blob_name=storage_path)
 
             consecutive_failures = 0
             page += 1
             time.sleep(0.5)
+
+        except NoMoreDataError:
+            # we got a 500 after some pages, indicating no more data
+            logger.info("no more data indicated by persistent 500 errors", page=page, endpoint=endpoint.name)
+            break
         except VMHubAPIError as e:
             consecutive_failures += 1
             logger.warning(
@@ -88,22 +95,21 @@ def process_endpoint(
     bq_helper: BigQueryHelper,
     formatted_cnpj: str
 ) -> None:
-    logger.info("Processing endpoint", endpoint=endpoint.name)
+    # logger.info("processing endpoint", endpoint=endpoint.name)
 
-    # Process date ranges if required
     if endpoint.requires_date_range:
         date_ranges = endpoint.get_date_ranges()
         total_ranges = len(date_ranges)
-        logger.info("Processing date ranges", endpoint=endpoint.name, total_ranges=total_ranges)
+        # logger.info("processing date ranges", endpoint=endpoint.name, total_ranges=total_ranges)
 
         for idx, (start_date, end_date) in enumerate(date_ranges, 1):
-            logger.info(
-                "Processing date range",
-                endpoint=endpoint.name,
-                range_number=f"{idx}/{total_ranges}",
-                start_date=start_date.isoformat(),
-                end_date=end_date.isoformat()
-            )
+            # logger.info(
+            #     "processing date range",
+            #     endpoint=endpoint.name,
+            #     range_number=f"{idx}/{total_ranges}",
+            #     start_date=start_date.isoformat(),
+            #     end_date=end_date.isoformat()
+            # )
             try:
                 process_date_range(
                     endpoint=endpoint,
@@ -134,9 +140,7 @@ def process_endpoint(
             formatted_cnpj=formatted_cnpj
         )
 
-    # After processing all pages (and date ranges), load data into BigQuery
-    # We assume all pages are stored at gs://{bucket}/CNPJ_{cnpj}/{endpoint}/response_pg*.json
-    # Load everything into CNPJ_{cnpj}_RAW.<endpoint>
+    # After processing all pages, load data from GCS to BQ
     gcs_uri_pattern = f"gs://{settings.GCS_BUCKET_NAME}/CNPJ_{formatted_cnpj}/{endpoint.name}/response_pg*.json"
     schema = settings.get_schema(endpoint.name)
     bq_helper.load_data_from_gcs(table_id=endpoint.name, schema=schema, source_uri=gcs_uri_pattern)
