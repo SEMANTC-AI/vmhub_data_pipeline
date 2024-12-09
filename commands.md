@@ -24,3 +24,14 @@ docker run \
   -e PYTHONPATH=/app \
   vmhub-pipeline:local
 ```
+
+
+
+
+<!-- RUN THE BUILD: -->
+```
+gcloud artifacts repositories create vmhub-api \
+    --repository-format=docker \
+    --location=us-central1 \
+    --description="Repository for VMHub API ETL images"
+```
