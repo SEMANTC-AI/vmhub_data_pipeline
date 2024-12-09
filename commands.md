@@ -33,5 +33,5 @@ docker run \
 gcloud artifacts repositories create vmhub-api \
     --repository-format=docker \
     --location=us-central1 \
-    --description="Repository for VMHub API ETL images"
+    --description="repository for VMHub API images"
 ```
