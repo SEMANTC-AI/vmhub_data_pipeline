@@ -17,11 +17,19 @@ class BigQueryHelper:
         dataset_ref = self.client.dataset(self.dataset_id)
         try:
             self.client.get_dataset(dataset_ref)
-        except Exception:
+            logger.info("BigQuery dataset exists", dataset_id=self.dataset_id)
+        except bigquery.NotFound:
             dataset = bigquery.Dataset(dataset_ref)
             dataset.location = "US"
             self.client.create_dataset(dataset, exists_ok=True)
             logger.info("created BigQuery dataset", dataset_id=self.dataset_id)
+        except Exception as e:
+            logger.error(
+                "failed to access or create BigQuery dataset",
+                error=str(e),
+                dataset_id=self.dataset_id
+            )
+            raise
 
     def _create_schema_field(self, field_def: Dict) -> bigquery.SchemaField:
         field_name = field_def['name']
@@ -49,12 +57,12 @@ class BigQueryHelper:
                 ignore_unknown_values=True
             )
 
-            # Log the URIs we're loading from
-            logger.info(
-                "starting BigQuery load",
-                table_id=full_table_id,
-                source_uris=source_uris
-            )
+            # # log the URIs we're loading from
+            # logger.info(
+            #     "starting BigQuery load",
+            #     table_id=full_table_id,
+            #     source_uris=source_uris
+            # )
 
             load_job = self.client.load_table_from_uri(
                 source_uris,
@@ -81,6 +89,21 @@ class BigQueryHelper:
                 output_rows=load_job.output_rows
             )
 
+        except bigquery.BadRequest as e:
+            logger.error(
+                "Bad request error during BigQuery load",
+                error=str(e),
+                table_id=table_id,
+                source_uris=source_uris
+            )
+            raise
+        except bigquery.NotFound as e:
+            logger.error(
+                "BigQuery table or dataset not found",
+                error=str(e),
+                table_id=table_id
+            )
+            raise
         except Exception as e:
             logger.error(
                 "failed to load data to BigQuery",

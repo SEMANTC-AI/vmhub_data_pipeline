@@ -1,7 +1,7 @@
 # src/main.py
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 from dotenv import load_dotenv
 import structlog
@@ -22,7 +22,7 @@ def format_cnpj(cnpj: str) -> str:
     return cnpj.replace('.', '').replace('/', '').replace('-', '')
 
 def get_storage_path(cnpj: str, endpoint: str, page: int, date_start: Optional[datetime] = None) -> str:
-    """generate storage path for data files"""
+    """Generate storage path for data files"""
     if endpoint == 'vendas' and date_start:
         date_str = date_start.strftime('%Y%m%d')
         return f"CNPJ_{cnpj}/{endpoint}/{date_str}/response_pg{page}.json"
@@ -30,7 +30,7 @@ def get_storage_path(cnpj: str, endpoint: str, page: int, date_start: Optional[d
         return f"CNPJ_{cnpj}/{endpoint}/response_pg{page}.json"
 
 def enrich_data(records: List[Dict], gcs_uri: str) -> List[Dict]:
-    """add metadata to records"""
+    """Add metadata to records"""
     ingestion_ts = datetime.utcnow().isoformat() + "Z"
     for rec in records:
         rec['gcs_uri'] = gcs_uri
@@ -47,13 +47,10 @@ def process_pages_for_date_range(
     start_date: Optional[datetime],
     end_date: Optional[datetime]
 ) -> bool:
-    """process all pages for a specific date range"""
-    page = 0
-    consecutive_failures = 0
-    max_consecutive_failures = 3
+    """Process all pages for a specific date range sequentially"""
     any_data_fetched = False
-
-    while consecutive_failures < max_consecutive_failures:
+    page = 0
+    while True:
         try:
             data = vmhub_client.get_data(
                 endpoint=endpoint.path,
@@ -65,8 +62,8 @@ def process_pages_for_date_range(
             )
 
             if not data:
-                logger.info("no more data returned", page=page, endpoint=endpoint.name)
-                break
+                logger.info("No more data returned", page=page, endpoint=endpoint.name)
+                break  # Stop fetching further pages
 
             storage_path = get_storage_path(
                 cnpj=formatted_cnpj,
@@ -79,23 +76,30 @@ def process_pages_for_date_range(
             gcs_helper.upload_json(data=enriched_data, blob_name=storage_path)
 
             any_data_fetched = True
-            consecutive_failures = 0
             page += 1
-            time.sleep(0.5)
+            time.sleep(0.5)  # Optional: Adjust delay as needed
+
         except NoMoreDataError:
-            logger.info("no more data available", page=page, endpoint=endpoint.name)
+            logger.info("No more data available via NoMoreDataError", page=page, endpoint=endpoint.name)
             break
         except VMHubAPIError as e:
-            consecutive_failures += 1
             logger.warning(
-                "failed to fetch page",
+                "Failed to fetch page",
                 error=str(e),
                 page=page,
                 endpoint=endpoint.name,
                 start_date=start_date.isoformat() if start_date else None,
                 end_date=end_date.isoformat() if end_date else None
             )
-            page += 1
+            page += 1  # Decide whether to continue or break based on the error
+        except Exception as e:
+            logger.error(
+                "Unexpected error processing page",
+                error=str(e),
+                page=page,
+                endpoint=endpoint.name
+            )
+            break  # Depending on the use case, decide to continue or stop
 
     return any_data_fetched
 
@@ -107,19 +111,53 @@ def process_endpoint(
     bq_helper: BigQueryHelper,
     formatted_cnpj: str
 ) -> None:
-    """process a single endpoint day by day"""
-    logger.info("processing endpoint", endpoint=endpoint.name)
+    """Process a single endpoint day by day"""
+    logger.info("Processing endpoint", endpoint=endpoint.name)
     any_data_processed = False
 
     if endpoint.requires_date_range:
-        # Process each day and store in GCS
-        for start_date, end_date in endpoint.get_daily_ranges():
+        if endpoint.name == 'vendas':
+            # Retrieve the latest processed date from GCS
+            latest_date = gcs_helper.get_latest_processed_date(endpoint.name, settings.VMHUB_CNPJ)
+            if latest_date:
+                # Start from the latest_date (inclusive) to re-fetch and replace data
+                start_date = latest_date
+                logger.info(
+                    "Resuming from latest processed date",
+                    endpoint=endpoint.name,
+                    start_date=start_date.date().isoformat()
+                )
+            else:
+                # No existing data; process the last 3 years
+                start_date = datetime.now(pytz.UTC) - timedelta(days=3*365)
+                logger.info(
+                    "No existing data found. Starting from 3 years ago",
+                    endpoint=endpoint.name,
+                    start_date=start_date.date().isoformat()
+                )
+            end_date = endpoint.end_date
+        else:
+            # For other endpoints that require date ranges
+            start_date = endpoint.start_date
+            end_date = endpoint.end_date
+
+        # Generate daily ranges starting from the determined start_date
+        for current_start_date, current_end_date in Endpoint(
+            name=endpoint.name,
+            path=endpoint.path,
+            page_size=endpoint.page_size,
+            max_retries=endpoint.max_retries,
+            schema_file=endpoint.schema_file,
+            requires_date_range=endpoint.requires_date_range,
+            start_date=start_date,
+            end_date=end_date
+        ).get_daily_ranges():
             logger.info(
                 "Processing date",
                 endpoint=endpoint.name,
-                date=start_date.date().isoformat()
+                date=current_start_date.date().isoformat()
             )
-            
+
             try:
                 data_fetched = process_pages_for_date_range(
                     endpoint=endpoint,
@@ -127,34 +165,34 @@ def process_endpoint(
                     vmhub_client=vmhub_client,
                     gcs_helper=gcs_helper,
                     formatted_cnpj=formatted_cnpj,
-                    start_date=start_date,
-                    end_date=end_date
+                    start_date=current_start_date,
+                    end_date=current_end_date
                 )
-                
+
                 if data_fetched:
                     any_data_processed = True
-                
+
                 # Add delay between days to avoid rate limiting
                 time.sleep(1.0)
-                
+
             except Exception as e:
                 logger.error(
-                    "error processing date",
+                    "Error processing date",
                     endpoint=endpoint.name,
-                    date=start_date.date().isoformat(),
+                    date=current_start_date.date().isoformat(),
                     error=str(e)
                 )
                 continue
-        
-        # after all days are processed, load everything to BigQuery
+
+        # After all days are processed, load everything to BigQuery
         if any_data_processed:
             # Get all files for this endpoint
             prefix = f"CNPJ_{formatted_cnpj}/{endpoint.name}/"
             source_uris = gcs_helper.get_all_file_uris(prefix)
-            
+
             if source_uris:
                 logger.info(
-                    "loading all files to BigQuery",
+                    "Loading all files to BigQuery",
                     endpoint=endpoint.name,
                     file_count=len(source_uris)
                 )
@@ -166,12 +204,12 @@ def process_endpoint(
                 )
             else:
                 logger.warning(
-                    "no files found for loading",
+                    "No files found for loading",
                     endpoint=endpoint.name
                 )
     else:
-        # non-date-range endpoint processing (like clientes)
-        process_pages_for_date_range(
+        # Non-date-range endpoint processing (like clientes)
+        data_fetched = process_pages_for_date_range(
             endpoint=endpoint,
             settings=settings,
             vmhub_client=vmhub_client,
@@ -180,6 +218,28 @@ def process_endpoint(
             start_date=None,
             end_date=None
         )
+        if data_fetched:
+            # Load to BigQuery if necessary
+            prefix = f"CNPJ_{formatted_cnpj}/{endpoint.name}/"
+            source_uris = gcs_helper.get_all_file_uris(prefix)
+
+            if source_uris:
+                logger.info(
+                    "Loading all files to BigQuery",
+                    endpoint=endpoint.name,
+                    file_count=len(source_uris)
+                )
+                schema = settings.get_schema(endpoint.name)
+                bq_helper.load_data_from_gcs(
+                    table_id=endpoint.name,
+                    schema=schema,
+                    source_uris=source_uris
+                )
+            else:
+                logger.warning(
+                    "No files found for loading",
+                    endpoint=endpoint.name
+                )
 
 def main():
     try:
@@ -197,25 +257,34 @@ def main():
         gcs_helper = GCSHelper(project_id=settings.GCP_PROJECT_ID, bucket_name=settings.GCS_BUCKET_NAME)
         bq_helper = BigQueryHelper(project_id=settings.GCP_PROJECT_ID, dataset_id=f"CNPJ_{formatted_cnpj}_RAW")
 
-        for endpoint in VMHubEndpoints.get_all():
-            try:
-                process_endpoint(
+        endpoints = VMHubEndpoints.get_all()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:  # Run 'vendas' and 'clientes' concurrently
+            future_to_endpoint = {
+                executor.submit(
+                    process_endpoint,
                     endpoint=endpoint,
                     settings=settings,
                     vmhub_client=vmhub_client,
                     gcs_helper=gcs_helper,
                     bq_helper=bq_helper,
                     formatted_cnpj=formatted_cnpj
-                )
-            except Exception as e:
-                logger.error(
-                    "error processing endpoint",
-                    endpoint=endpoint.name,
-                    error=str(e)
-                )
+                ): endpoint for endpoint in endpoints if endpoint.name in ['vendas', 'clientes']
+            }
+
+            for future in as_completed(future_to_endpoint):
+                endpoint = future_to_endpoint[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.error(
+                        "Error processing endpoint",
+                        endpoint=endpoint.name,
+                        error=str(e)
+                    )
 
     except Exception as e:
-        logger.error("error in main execution", error=str(e))
+        logger.error("Error in main execution", error=str(e))
         raise
 
 if __name__ == "__main__":

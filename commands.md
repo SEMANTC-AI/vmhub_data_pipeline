@@ -30,8 +30,6 @@ docker run \
 
 <!-- RUN THE BUILD: -->
 ```
-gcloud artifacts repositories create vmhub-api \
-    --repository-format=docker \
-    --location=us-central1 \
-    --description="repository for VMHub API images"
+chmod +x scripts/deploy.sh
+./scripts/deploy.sh
 ```

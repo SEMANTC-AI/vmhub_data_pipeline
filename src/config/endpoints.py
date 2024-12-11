@@ -11,13 +11,13 @@ class Endpoint:
     path: str
     page_size: int = 10
     max_retries: int = 3
-    schema_file: str = None
+    schema_file: Optional[str] = None
     requires_date_range: bool = False
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
 
     def get_daily_ranges(self) -> Generator[tuple[datetime, datetime], None, None]:
-        """generate daily date ranges from start_date to end_date"""
+        """Generate daily date ranges from start_date to end_date"""
         if not self.requires_date_range or not self.start_date:
             return
 
@@ -25,9 +25,9 @@ class Endpoint:
         end_date = self.end_date or datetime.now(pytz.UTC)
 
         while current_date <= end_date:
-            # set time to start of day
+            # Set time to start of day
             day_start = datetime.combine(current_date.date(), time.min, tzinfo=pytz.UTC)
-            # set time to end of day
+            # Set time to end of day
             day_end = datetime.combine(current_date.date(), time.max, tzinfo=pytz.UTC)
             
             yield (day_start, day_end)
@@ -47,7 +47,7 @@ class VMHubEndpoints:
         page_size=100,
         schema_file='vendas.json',
         requires_date_range=True,
-        start_date=datetime(2023, 3, 1, tzinfo=pytz.UTC),
+        start_date=datetime(2021, 1, 1, tzinfo=pytz.UTC),  # Adjust to 3 years ago or earlier as needed
         end_date=datetime.now(pytz.UTC)
     )
 
