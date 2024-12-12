@@ -47,59 +47,140 @@ def process_pages_for_date_range(
     start_date: Optional[datetime],
     end_date: Optional[datetime]
 ) -> bool:
-    """Process all pages for a specific date range sequentially"""
+    """Process all pages for a specific date range sequentially with robust error handling."""
     any_data_fetched = False
-    page = 0
+    page = 1  # Assuming page numbering starts at 1
+    max_retries = 3  # Number of retries for a failed page
+    original_page_size = endpoint.page_size
+
     while True:
-        try:
-            data = vmhub_client.get_data(
-                endpoint=endpoint.path,
-                cnpj=settings.VMHUB_CNPJ,
-                page=page,
-                page_size=endpoint.page_size,
-                date_start=start_date,
-                date_end=end_date
-            )
+        retries = 0
+        while retries < max_retries:
+            try:
+                data = vmhub_client.get_data(
+                    endpoint=endpoint.path,
+                    cnpj=settings.VMHUB_CNPJ,
+                    page=page,
+                    page_size=original_page_size,
+                    date_start=start_date,
+                    date_end=end_date
+                )
 
-            if not data:
-                logger.info("No more data returned", page=page, endpoint=endpoint.name)
-                break  # Stop fetching further pages
+                if not data:
+                    logger.info("No more data returned", page=page, endpoint=endpoint.name)
+                    return any_data_fetched  # Stop fetching further pages
 
-            storage_path = get_storage_path(
-                cnpj=formatted_cnpj,
-                endpoint=endpoint.name,
-                page=page,
-                date_start=start_date if endpoint.name == 'vendas' else None
-            )
-            gcs_uri = f"gs://{settings.GCS_BUCKET_NAME}/{storage_path}"
-            enriched_data = enrich_data(data, gcs_uri=gcs_uri)
-            gcs_helper.upload_json(data=enriched_data, blob_name=storage_path)
+                storage_path = get_storage_path(
+                    cnpj=formatted_cnpj,
+                    endpoint=endpoint.name,
+                    page=page,
+                    date_start=start_date if endpoint.name == 'vendas' else None
+                )
+                gcs_uri = f"gs://{settings.GCS_BUCKET_NAME}/{storage_path}"
+                enriched_data = enrich_data(data, gcs_uri=gcs_uri)
+                gcs_helper.upload_json(data=enriched_data, blob_name=storage_path)
 
-            any_data_fetched = True
-            page += 1
-            time.sleep(0.5)  # Optional: Adjust delay as needed
+                any_data_fetched = True
+                page += 1
+                time.sleep(0.5)  # Optional: Adjust delay as needed
+                break  # Successful fetch, move to next page
 
-        except NoMoreDataError:
-            logger.info("No more data available via NoMoreDataError", page=page, endpoint=endpoint.name)
-            break
-        except VMHubAPIError as e:
-            logger.warning(
-                "Failed to fetch page",
-                error=str(e),
-                page=page,
-                endpoint=endpoint.name,
-                start_date=start_date.isoformat() if start_date else None,
-                end_date=end_date.isoformat() if end_date else None
-            )
-            page += 1  # Decide whether to continue or break based on the error
-        except Exception as e:
-            logger.error(
-                "Unexpected error processing page",
-                error=str(e),
-                page=page,
-                endpoint=endpoint.name
-            )
-            break  # Depending on the use case, decide to continue or stop
+            except VMHubAPIError as e:
+                retries += 1
+                logger.warning(
+                    "Failed to fetch page",
+                    error=str(e),
+                    page=page,
+                    endpoint=endpoint.name,
+                    attempt=retries
+                )
+                time.sleep(2 ** retries)  # Exponential backoff
+
+            except Exception as e:
+                retries += 1
+                logger.error(
+                    "Unexpected error processing page",
+                    error=str(e),
+                    page=page,
+                    endpoint=endpoint.name,
+                    attempt=retries
+                )
+                time.sleep(2 ** retries)  # Exponential backoff
+
+        else:
+            # After max retries, handle the failure based on the endpoint
+            if endpoint.name == 'clientes':
+                logger.info(
+                    "Max retries reached. Attempting to fetch individual records for page.",
+                    endpoint=endpoint.name,
+                    page=page
+                )
+                # Calculate individual page numbers for single-record fetching
+                # Assuming page numbering starts at 1 and is sequential
+                # Original page_size = 10, so individual pages start from (page -1)*10 +1 to page*10
+                start_record = (page - 1) * original_page_size + 1
+                end_record = page * original_page_size
+
+                for individual_record in range(start_record, end_record + 1):
+                    try:
+                        individual_page = individual_record
+                        individual_data = vmhub_client.get_data(
+                            endpoint=endpoint.path,
+                            cnpj=settings.VMHUB_CNPJ,
+                            page=individual_page,
+                            page_size=1,
+                            date_start=start_date,
+                            date_end=end_date
+                        )
+
+                        if individual_data:
+                            storage_path = get_storage_path(
+                                cnpj=formatted_cnpj,
+                                endpoint=endpoint.name,
+                                page=individual_page,
+                                date_start=start_date if endpoint.name == 'vendas' else None
+                            )
+                            gcs_uri = f"gs://{settings.GCS_BUCKET_NAME}/{storage_path}"
+                            enriched_data = enrich_data(individual_data, gcs_uri=gcs_uri)
+                            gcs_helper.upload_json(data=enriched_data, blob_name=storage_path)
+                            any_data_fetched = True
+                            logger.info(
+                                "Successfully fetched and uploaded individual record",
+                                endpoint=endpoint.name,
+                                record=individual_record
+                            )
+                        else:
+                            logger.info(
+                                "No data returned for individual record",
+                                endpoint=endpoint.name,
+                                record=individual_record
+                            )
+
+                    except VMHubAPIError as e:
+                        logger.warning(
+                            "Failed to fetch individual record",
+                            error=str(e),
+                            endpoint=endpoint.name,
+                            record=individual_record
+                        )
+                        continue  # Skip to next record
+
+                    except Exception as e:
+                        logger.error(
+                            "Unexpected error fetching individual record",
+                            error=str(e),
+                            endpoint=endpoint.name,
+                            record=individual_record
+                        )
+                        continue  # Skip to next record
+
+            else:
+                logger.warning(
+                    "Max retries reached. Skipping page.",
+                    endpoint=endpoint.name,
+                    page=page
+                )
+            page += 1  # Move to next page
 
     return any_data_fetched
 
@@ -111,7 +192,7 @@ def process_endpoint(
     bq_helper: BigQueryHelper,
     formatted_cnpj: str
 ) -> None:
-    """Process a single endpoint day by day"""
+    """Process a single endpoint day by day."""
     logger.info("Processing endpoint", endpoint=endpoint.name)
     any_data_processed = False
 
@@ -129,7 +210,7 @@ def process_endpoint(
                 )
             else:
                 # No existing data; process the last 3 years
-                start_date = datetime.now(pytz.UTC) - timedelta(days=3*365)
+                start_date = datetime.now(pytz.UTC) - timedelta(days=2*365)
                 logger.info(
                     "No existing data found. Starting from 3 years ago",
                     endpoint=endpoint.name,

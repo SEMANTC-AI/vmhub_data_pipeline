@@ -47,7 +47,7 @@ class VMHubEndpoints:
         page_size=100,
         schema_file='vendas.json',
         requires_date_range=True,
-        start_date=datetime(2021, 1, 1, tzinfo=pytz.UTC),  # Adjust to 3 years ago or earlier as needed
+        start_date=datetime(2023, 1, 1, tzinfo=pytz.UTC),  # adjust to 2 years ago or earlier as needed
         end_date=datetime.now(pytz.UTC)
     )
 
