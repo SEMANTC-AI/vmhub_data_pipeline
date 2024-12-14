@@ -297,13 +297,13 @@ def process_endpoint(
 
 def main():
     try:
-        # Fetch the customer_id from environment or another source
-        customer_id = os.getenv('CUSTOMER_ID')
-        if not customer_id:
-            raise ValueError("Missing CUSTOMER_ID environment variable")
+        # Fetch the user_id from environment or another source
+        user_id = os.getenv('USER_ID')
+        if not user_id:
+            raise ValueError("Missing USER_ID environment variable")
 
         # Get credentials from Firestore
-        vmhub_token, cnpj = get_customer_data(customer_id)
+        vmhub_token, cnpj = get_customer_data(user_id)
 
         # Set environment variables so Settings can use them
         os.environ['VMHUB_API_KEY'] = vmhub_token
