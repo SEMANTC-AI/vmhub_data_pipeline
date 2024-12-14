@@ -1,131 +1,130 @@
-# VMHub Data Pipeline
+# VMHub Data Fetch Pipeline
 
-This project implements a data pipeline to fetch data from VMHub API, store it in Google Cloud Storage (GCS), and load it into BigQuery for analysis.
+This project focuses solely on fetching data from the VMHub API, storing it in Google Cloud Storage (GCS), and loading it into BigQuery for analysis. The pipeline dynamically retrieves credentials (CNPJ and VMHub token) from Firestore rather than relying on static environment variables.
 
 ## Overview
 
-The pipeline performs the following operations:
-- Fetches data from VMHub API (clientes and vendas endpoints)
-- Processes data in daily batches for time-based endpoints
-- Stores raw data in GCS with appropriate partitioning
-- Loads processed data into BigQuery with schema validation
-- Handles incremental loading and deduplication
+**Key Operations:**
+- Fetch `clientes` and `vendas` from the VMHub API
+- Handle time-based endpoints (like `vendas`) in daily batches for historical data
+- Store raw JSON responses in GCS
+- Load processed data into BigQuery with schema validation
+- Use incremental loading and deduplication to keep data fresh and clean
+
+**Dynamic Credentials:**
+- The pipeline uses a Firestore `users` collection to fetch the `vmhubToken` and `cnpj`
+- Provide the `USER_ID` (the Firestore document ID) at runtime. The pipeline will read the `config` map from the document to get these values
 
 ## Project Structure
-
 ```
 vmhub_data_pipeline/
-├── schemas/                    # BigQuery schema definitions
+├── schemas/
 │   ├── clientes.json
 │   └── vendas.json
 ├── src/
-│   ├── api/                   # API client implementation
-│   │   ├── __init__.py
-│   │   └── vmhub_client.py
-│   ├── config/                # Configuration management
-│   │   ├── __init__.py
-│   │   ├── settings.py
-│   │   └── endpoints.py
-│   ├── utils/                 # Utility functions
-│   │   ├── __init__.py
-│   │   ├── gcs_helper.py
-│   │   └── bigquery_helper.py
-│   ├── __init__.py
-│   └── main.py               # Main execution script
+│   ├── api/                   # VMHub API client
+│   ├── config/                # Configuration and endpoints
+│   ├── utils/                 # GCS, BQ, Firestore helpers
+│   └── main.py                # Main execution script
 ├── scripts/
-│   └── build_push.sh         # Docker build and deployment script
-├── credentials/              # GCP credentials (not in repo)
-│   └── credentials.json
+│   └── build_push.sh          # Build & deploy scripts
+├── credentials/
+│   └── credentials.json       # GCP service account credentials (not committed)
 ├── Dockerfile
 ├── requirements.txt
-└── .env                      # Environment variables
+└── .env
 ```
 
 ## Prerequisites
 
-- Python 3.9+
-- Docker
-- Google Cloud Platform account with:
-  - BigQuery enabled
-  - Cloud Storage enabled
-  - Service account with appropriate permissions
+- **Python** 3.9+
+- **Docker**
+- **GCP Setup**:
+  - Firestore (Native mode) in the same project as GCS & BigQuery
+  - BigQuery and GCS enabled
+  - A service account with **Datastore User**, **Storage Admin**, and **BigQuery Admin** roles
+- The Firestore document at `users/{USER_ID}` must have a `config` map with `vmhubToken` and `cnpj`
+
+**Example Firestore Document:**
+```json
+{
+  "config": {
+    "cnpj": "48986168000144",
+    "vmhubToken": "e8d5026b-7779-42e6-b695-a208567423db",
+    "status": "pending",
+    "createdAt": "<timestamp>",
+    "updatedAt": "<timestamp>"
+  }
+}
+```
 
 ## Configuration
 
-1. Create `.env` file with required variables:
+1. **.env File**:
+   Provide the base URL and GCP details:
 ```env
-VMHUB_API_KEY=your-api-key
-VMHUB_CNPJ=your-cnpj
 VMHUB_BASE_URL=https://apps.vmhub.vmtecnologia.io/vmlav/api/externa/v1
 GCP_PROJECT_ID=your-project-id
 GCS_BUCKET_NAME=vmhub-data
 ```
+No need for VMHUB_API_KEY or VMHUB_CNPJ here; they are fetched from Firestore.
 
-2. Place GCP service account credentials in `credentials/credentials.json`
+2. **Credentials**:
+   Place your GCP service account key as credentials.json under credentials/.
 
 ## Installation
 
-1. Create virtual environment:
+1. **Virtual Environment:**
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-.venv\Scripts\activate    # Windows
-```
-
-2. Install dependencies:
-```bash
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Usage
-
-### Local Development
+2. **Local Testing:**
 ```bash
+export USER_ID=<your_firestore_user_id>
 python -m src.main
 ```
 
-### Docker Deployment
-```bash
-# Build image
-docker build -t vmhub-pipeline:local .
+## Running via Docker
 
-# Run container
+**Build & Run Locally:**
+```bash
+docker build -t vmhub-pipeline:local .
 docker run \
   -v $(pwd)/.env:/app/.env \
   -v $(pwd)/credentials/credentials.json:/app/credentials/credentials.json:ro \
   -e GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/credentials.json \
   -e PYTHONPATH=/app \
+  -e USER_ID=<your_firestore_user_id> \
   vmhub-pipeline:local
 ```
 
-### Cloud Run Deployment
+**Deploying to Cloud Run via Artifact Registry**
+
+**Build & Push:**
 ```bash
-# Build and deploy
 ./scripts/build_push.sh
 ```
+Then configure the Cloud Run job with USER_ID as an environment variable and run the job.
 
 ## Data Flow
 
-1. **Data Fetch**:
-   - Clients data: Simple pagination
-   - Sales data: Daily batches with pagination
+1. **Credentials from Firestore**:
+   - Retrieve vmhubToken and cnpj from users/{USER_ID}/config
 
-2. **Storage**:
-   - GCS Path Format: `CNPJ_{cnpj}/{endpoint}/{yyyy/mm/dd}/response_pg{page}.json`
-   - Data enriched with metadata (GCS URI, ingestion timestamp)
+2. **Data Fetching**:
+   - clientes: Paginated retrieval
+   - vendas: Daily partitioned fetch for historical data
 
-3. **BigQuery**:
-   - Tables created in dataset: `CNPJ_{cnpj}_RAW`
-   - Schema validation and enforcement
-   - Deduplication based on record IDs
+3. **Storage in GCS**:
+   - Raw JSON data saved as gs://{GCS_BUCKET_NAME}/CNPJ_{cnpj}/{endpoint}/{date}/response_pg{page}.json
+   - Each record enriched with ingestion_timestamp, gcs_uri, and source_system
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit changes
-4. Push to the branch
-5. Create a Pull Request
+4. **Loading into BigQuery**:
+   - Data loaded into CNPJ_{cnpj}_RAW dataset
+   - Deduplication and schema validation ensures data quality
 
 ## License
 
