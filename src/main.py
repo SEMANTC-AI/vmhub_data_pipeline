@@ -14,6 +14,7 @@ from src.utils.gcs_helper import GCSHelper
 from src.utils.bigquery_helper import BigQueryHelper
 from src.config.settings import Settings
 from src.config.endpoints import VMHubEndpoints, Endpoint
+from src.utils.firestore_helper import get_customer_data  # NEW
 
 load_dotenv()
 logger = structlog.get_logger()
@@ -49,8 +50,8 @@ def process_pages_for_date_range(
 ) -> bool:
     """Process all pages for a specific date range sequentially with robust error handling."""
     any_data_fetched = False
-    page = 1  # Assuming page numbering starts at 1
-    max_retries = 3  # Number of retries for a failed page
+    page = 1
+    max_retries = 3
     original_page_size = endpoint.page_size
 
     while True:
@@ -108,16 +109,13 @@ def process_pages_for_date_range(
                 time.sleep(2 ** retries)  # Exponential backoff
 
         else:
-            # After max retries, handle the failure based on the endpoint
+            # After max retries for this page
             if endpoint.name == 'clientes':
                 logger.info(
-                    "Max retries reached. Attempting to fetch individual records for page.",
+                    "Max retries reached. Attempting individual records.",
                     endpoint=endpoint.name,
                     page=page
                 )
-                # Calculate individual page numbers for single-record fetching
-                # Assuming page numbering starts at 1 and is sequential
-                # Original page_size = 10, so individual pages start from (page -1)*10 +1 to page*10
                 start_record = (page - 1) * original_page_size + 1
                 end_record = page * original_page_size
 
@@ -145,7 +143,7 @@ def process_pages_for_date_range(
                             gcs_helper.upload_json(data=enriched_data, blob_name=storage_path)
                             any_data_fetched = True
                             logger.info(
-                                "Successfully fetched and uploaded individual record",
+                                "Fetched and uploaded individual record",
                                 endpoint=endpoint.name,
                                 record=individual_record
                             )
@@ -155,7 +153,6 @@ def process_pages_for_date_range(
                                 endpoint=endpoint.name,
                                 record=individual_record
                             )
-
                     except VMHubAPIError as e:
                         logger.warning(
                             "Failed to fetch individual record",
@@ -163,8 +160,7 @@ def process_pages_for_date_range(
                             endpoint=endpoint.name,
                             record=individual_record
                         )
-                        continue  # Skip to next record
-
+                        continue
                     except Exception as e:
                         logger.error(
                             "Unexpected error fetching individual record",
@@ -172,15 +168,14 @@ def process_pages_for_date_range(
                             endpoint=endpoint.name,
                             record=individual_record
                         )
-                        continue  # Skip to next record
-
+                        continue
             else:
                 logger.warning(
                     "Max retries reached. Skipping page.",
                     endpoint=endpoint.name,
                     page=page
                 )
-            page += 1  # Move to next page
+            page += 1
 
     return any_data_fetched
 
@@ -192,16 +187,13 @@ def process_endpoint(
     bq_helper: BigQueryHelper,
     formatted_cnpj: str
 ) -> None:
-    """Process a single endpoint day by day."""
     logger.info("Processing endpoint", endpoint=endpoint.name)
     any_data_processed = False
 
     if endpoint.requires_date_range:
         if endpoint.name == 'vendas':
-            # Retrieve the latest processed date from GCS
             latest_date = gcs_helper.get_latest_processed_date(endpoint.name, settings.VMHUB_CNPJ)
             if latest_date:
-                # Start from the latest_date (inclusive) to re-fetch and replace data
                 start_date = latest_date
                 logger.info(
                     "Resuming from latest processed date",
@@ -209,20 +201,17 @@ def process_endpoint(
                     start_date=start_date.date().isoformat()
                 )
             else:
-                # No existing data; process the last 3 years
                 start_date = datetime.now(pytz.UTC) - timedelta(days=2*365)
                 logger.info(
-                    "No existing data found. Starting from 3 years ago",
+                    "No existing data found. Starting from 2 years ago",
                     endpoint=endpoint.name,
                     start_date=start_date.date().isoformat()
                 )
             end_date = endpoint.end_date
         else:
-            # For other endpoints that require date ranges
             start_date = endpoint.start_date
             end_date = endpoint.end_date
 
-        # Generate daily ranges starting from the determined start_date
         for current_start_date, current_end_date in Endpoint(
             name=endpoint.name,
             path=endpoint.path,
@@ -249,13 +238,9 @@ def process_endpoint(
                     start_date=current_start_date,
                     end_date=current_end_date
                 )
-
                 if data_fetched:
                     any_data_processed = True
-
-                # Add delay between days to avoid rate limiting
                 time.sleep(1.0)
-
             except Exception as e:
                 logger.error(
                     "Error processing date",
@@ -265,15 +250,12 @@ def process_endpoint(
                 )
                 continue
 
-        # After all days are processed, load everything to BigQuery
         if any_data_processed:
-            # Get all files for this endpoint
             prefix = f"CNPJ_{formatted_cnpj}/{endpoint.name}/"
             source_uris = gcs_helper.get_all_file_uris(prefix)
-
             if source_uris:
                 logger.info(
-                    "Loading all files to BigQuery",
+                    "Loading files to BigQuery",
                     endpoint=endpoint.name,
                     file_count=len(source_uris)
                 )
@@ -284,12 +266,8 @@ def process_endpoint(
                     source_uris=source_uris
                 )
             else:
-                logger.warning(
-                    "No files found for loading",
-                    endpoint=endpoint.name
-                )
+                logger.warning("No files found for loading", endpoint=endpoint.name)
     else:
-        # Non-date-range endpoint processing (like clientes)
         data_fetched = process_pages_for_date_range(
             endpoint=endpoint,
             settings=settings,
@@ -300,13 +278,11 @@ def process_endpoint(
             end_date=None
         )
         if data_fetched:
-            # Load to BigQuery if necessary
             prefix = f"CNPJ_{formatted_cnpj}/{endpoint.name}/"
             source_uris = gcs_helper.get_all_file_uris(prefix)
-
             if source_uris:
                 logger.info(
-                    "Loading all files to BigQuery",
+                    "Loading files to BigQuery",
                     endpoint=endpoint.name,
                     file_count=len(source_uris)
                 )
@@ -317,13 +293,22 @@ def process_endpoint(
                     source_uris=source_uris
                 )
             else:
-                logger.warning(
-                    "No files found for loading",
-                    endpoint=endpoint.name
-                )
+                logger.warning("No files found for loading", endpoint=endpoint.name)
 
 def main():
     try:
+        # Fetch the customer_id from environment or another source
+        customer_id = os.getenv('CUSTOMER_ID')
+        if not customer_id:
+            raise ValueError("Missing CUSTOMER_ID environment variable")
+
+        # Get credentials from Firestore
+        vmhub_token, cnpj = get_customer_data(customer_id)
+
+        # Set environment variables so Settings can use them
+        os.environ['VMHUB_API_KEY'] = vmhub_token
+        os.environ['VMHUB_CNPJ'] = cnpj
+
         settings = Settings()
         vmhub_client = VMHubClient(
             base_url=settings.VMHUB_BASE_URL,
@@ -340,7 +325,8 @@ def main():
 
         endpoints = VMHubEndpoints.get_all()
 
-        with ThreadPoolExecutor(max_workers=2) as executor:  # Run 'vendas' and 'clientes' concurrently
+        # Example: concurrency for vendas and clientes
+        with ThreadPoolExecutor(max_workers=2) as executor:
             future_to_endpoint = {
                 executor.submit(
                     process_endpoint,

@@ -33,3 +33,7 @@ docker run \
 chmod +x scripts/deploy.sh
 ./scripts/deploy.sh
 ```
+
+
+docker build -t us-central1-docker.pkg.dev/your-project-id/your-repo/vmhub-data-pipeline:latest .
+docker push us-central1-docker.pkg.dev/your-project-id/your-repo/vmhub-data-pipeline:latest
