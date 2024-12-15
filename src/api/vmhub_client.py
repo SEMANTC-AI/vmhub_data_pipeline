@@ -1,20 +1,24 @@
 # src/api/vmhub_client.py
+
 import requests
 from typing import Dict, List, Optional, Union
 import structlog
 from urllib.parse import quote
 import time
 from random import uniform
+from datetime import datetime
 
 logger = structlog.get_logger()
 
 class VMHubAPIError(Exception):
-    """Custom exception for VMHub API errors."""
+    pass
+
+class NoMoreDataError(Exception):
+    """Indicates no more data is available from the API"""
     pass
 
 class VMHubClient:
-    """Client for interacting with VMHub API."""
-    
+    """Client to interact with VMHub API"""
     def __init__(
         self, 
         base_url: str, 
@@ -24,17 +28,6 @@ class VMHubClient:
         max_backoff: float = 32.0,
         backoff_factor: float = 2.0
     ):
-        """
-        Initialize VMHub client.
-        
-        Args:
-            base_url: Base URL for VMHub API
-            api_key: API key for authentication
-            max_retries: Maximum number of retry attempts
-            initial_backoff: Initial backoff time in seconds
-            max_backoff: Maximum backoff time in seconds
-            backoff_factor: Multiplication factor for exponential backoff
-        """
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.max_retries = max_retries
@@ -54,131 +47,100 @@ class VMHubClient:
         endpoint: str, 
         params: Optional[Dict] = None
     ) -> Union[List[Dict], Dict]:
-        """
-        Make HTTP request with exponential backoff retry logic.
-        """
         url = f"{self.base_url}/{endpoint}"
         current_retry = 0
         current_backoff = self.initial_backoff
 
         while current_retry <= self.max_retries:
             try:
-                response = self.session.request(
-                    method=method,
-                    url=url,
-                    params=params
-                )
-                
-                # If successful, return immediately
+                response = self.session.request(method=method, url=url, params=params)
                 response.raise_for_status()
+                logger.debug("successful API request", url=url, params=params, status_code=response.status_code)
                 return response.json()
-                
-            except requests.exceptions.RequestException as e:
-                current_retry += 1
-                
-                # If it's the last retry, raise the error
-                if current_retry > self.max_retries:
-                    logger.error(
-                        "VMHub API request failed after all retries",
-                        error=str(e),
-                        url=url,
-                        method=method,
-                        params=params,
-                        retry_count=current_retry
-                    )
-                    raise VMHubAPIError(f"API request failed after {self.max_retries} retries: {str(e)}")
-                
-                # If it's a 500 error on the last page, it might mean no more data
-                if (
-                    isinstance(e, requests.exceptions.HTTPError) 
-                    and e.response.status_code == 500 
-                    and params 
-                    and params.get('pagina', 0) > 0
-                ):
-                    raise VMHubAPIError(f"API request failed: {str(e)}")
-                
-                # Add jitter to backoff
-                jitter = uniform(0, 0.1 * current_backoff)
-                sleep_time = min(current_backoff + jitter, self.max_backoff)
-                
+            except requests.exceptions.HTTPError as e:
+                status_code = e.response.status_code if e.response else None
                 logger.warning(
-                    "Request failed, retrying",
-                    error=str(e),
-                    retry_number=current_retry,
-                    backoff_time=sleep_time,
+                    "HTTP error during API request",
                     url=url,
-                    method=method,
-                    params=params
+                    params=params,
+                    status_code=status_code,
+                    error=str(e)
                 )
-                
-                time.sleep(sleep_time)
-                current_backoff *= self.backoff_factor
-    
-    def get_clients(
+                # Specific handling for certain status codes
+                if status_code == 404:
+                    logger.error("Endpoint not found", endpoint=endpoint)
+                    raise VMHubAPIError(f"Endpoint not found: {endpoint}")
+                elif status_code == 429:
+                    logger.warning("Rate limited by API", retry_number=current_retry)
+                elif status_code >= 500 and params and params.get('pagina', 0) > 0:
+                    logger.warning("500 error indicating no more data",
+                                   page=params.get('pagina'), endpoint=endpoint)
+                    raise NoMoreDataError("No more data available.")
+                current_retry += 1
+            except requests.exceptions.RequestException as e:
+                logger.warning(
+                    "Request exception during API call",
+                    url=url,
+                    params=params,
+                    error=str(e)
+                )
+                current_retry += 1
+
+            if current_retry > self.max_retries:
+                logger.error("VMHub API request failed after all retries", error=str(e), url=url, params=params)
+                raise VMHubAPIError(f"API request failed after {self.max_retries} retries: {str(e)}")
+
+            # Exponential backoff with jitter
+            jitter = uniform(0, 0.1 * current_backoff)
+            sleep_time = min(current_backoff + jitter, self.max_backoff)
+            logger.warning("Request failed, retrying", 
+                           retry_number=current_retry, 
+                           backoff_time=sleep_time,
+                           url=url, 
+                           params=params,
+                           status_code=status_code)
+            time.sleep(sleep_time)
+            current_backoff *= self.backoff_factor
+
+    def get_data(
         self, 
+        endpoint: str,
         cnpj: str, 
         page: int = 0, 
-        page_size: int = 10
+        page_size: int = 10,
+        date_start: Optional[datetime] = None,
+        date_end: Optional[datetime] = None,
+        somente_sucesso: bool = True
     ) -> List[Dict]:
-        """
-        Fetch clients from VMHub API.
-        
-        Args:
-            cnpj: Company CNPJ
-            page: Page number (0-based)
-            page_size: Number of records per page (max 10)
-            
-        Returns:
-            List of client records
-        """
-        if page_size > 10:
-            raise ValueError("page_size cannot exceed 10")
-        
-        # URL encode CNPJ
+        if endpoint == 'clientes' and page_size > 10:
+            raise ValueError("page_size cannot exceed 10 for clientes endpoint")
+        if endpoint == 'vendas' and page_size > 1000:
+            raise ValueError("page_size cannot exceed 1000 for vendas endpoint")
+
         encoded_cnpj = quote(cnpj)
-        
         params = {
             'CNPJ': encoded_cnpj,
             'pagina': page,
             'quantidade': page_size
         }
+        if date_start and date_end:
+            params.update({
+                'dataInicio': date_start.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'dataTermino': date_end.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'somenteSucesso': str(somente_sucesso).lower()
+            })  # <-- Added missing closing parenthesis here
+
+        response_data = self._make_request_with_backoff('GET', endpoint, params=params)
         
-        try:
-            response_data = self._make_request_with_backoff(
-                method='GET',
-                endpoint='clientes',
-                params=params
-            )
-            
-            if not isinstance(response_data, list):
-                logger.error(
-                    "Unexpected response format",
-                    response_data=response_data
-                )
-                raise VMHubAPIError("Unexpected response format")
-                
-            logger.info(
-                "Successfully fetched clients",
-                cnpj=cnpj,
-                page=page,
-                record_count=len(response_data)
-            )
-            
-            return response_data
-            
-        except VMHubAPIError:
-            logger.error(
-                "Failed to fetch clients",
-                cnpj=cnpj,
-                page=page,
-                page_size=page_size
-            )
-            raise
+        if not isinstance(response_data, list):
+            logger.error("unexpected response format", response=response_data)
+            raise VMHubAPIError("Unexpected response format")
+
+        logger.info("fetched data", endpoint=endpoint, cnpj=cnpj, page=page, record_count=len(response_data))
+        return response_data
 
     def __enter__(self):
-        """Context manager enter."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
         self.session.close()

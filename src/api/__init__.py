@@ -1,6 +1,5 @@
 # src/api/__init__.py
-"""VMHub API client package."""
 
-from .vmhub_client import VMHubClient
+from .vmhub_client import VMHubClient, VMHubAPIError
 
-__all__ = ['VMHubClient']
+__all__ = ['VMHubClient', 'VMHubAPIError']

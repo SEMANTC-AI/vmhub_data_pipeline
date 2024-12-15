@@ -1,7 +1,7 @@
-"""VMHub Data Pipeline package."""
+# src/__init__.py
+
 import structlog
 
-# Configure structured logging
 structlog.configure(
     processors=[
         structlog.processors.TimeStamper(fmt="iso"),

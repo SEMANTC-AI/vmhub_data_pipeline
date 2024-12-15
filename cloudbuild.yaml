@@ -1,0 +1,17 @@
+steps:
+  # BUILD THE CONTAINER IMAGE
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${_TAG}', '.']
+
+  # PUSH THE CONTAINER IMAGE TO ARTIFACT REGISTRY
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${_TAG}']
+
+substitutions:
+  _REGION: us-central1
+  _REPOSITORY: vmhub-api
+  _IMAGE: vmhub-etl
+  _TAG: latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY

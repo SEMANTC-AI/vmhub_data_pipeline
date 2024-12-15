@@ -1,9 +1,9 @@
 # src/utils/bigquery_helper.py
-import json
-import io
-from typing import Dict, List, Union
+
+from typing import Dict, List
 from google.cloud import bigquery
 import structlog
+from google.api_core.exceptions import NotFound
 
 logger = structlog.get_logger()
 
@@ -18,110 +18,90 @@ class BigQueryHelper:
         dataset_ref = self.client.dataset(self.dataset_id)
         try:
             self.client.get_dataset(dataset_ref)
-        except Exception:
+            logger.info("BigQuery dataset exists", dataset_id=self.dataset_id)
+        except NotFound:
+            # If dataset doesn't exist, create it
             dataset = bigquery.Dataset(dataset_ref)
             dataset.location = "US"
             self.client.create_dataset(dataset, exists_ok=True)
-            logger.info(
-                "Created BigQuery dataset",
-                dataset_id=self.dataset_id
-            )
-
-    def get_existing_ids(self, table_id: str) -> set:
-        """Get set of existing IDs from the table."""
-        try:
-            query = f"""
-                SELECT DISTINCT id 
-                FROM `{self.project_id}.{self.dataset_id}.{table_id}`
-            """
-            query_job = self.client.query(query)
-            results = query_job.result()
-            
-            existing_ids = {row.id for row in results}
-            
-            logger.info(
-                "Retrieved existing IDs",
-                table_id=table_id,
-                count=len(existing_ids)
-            )
-            
-            return existing_ids
-            
-        except Exception as e:
-            # If table doesn't exist, return empty set
-            logger.info(
-                "No existing IDs found (table might not exist)",
-                table_id=table_id,
-                error=str(e)
-            )
-            return set()
-
-    def load_json(
-        self, 
-        data: List[Dict], 
-        table_id: str, 
-        schema: List[Dict],
-        write_disposition: str = 'WRITE_APPEND'
-    ) -> None:
-        """Load JSON data into BigQuery table with deduplication."""
-        try:
-            # Get existing IDs
-            existing_ids = self.get_existing_ids(table_id)
-            
-            # Filter out records with existing IDs
-            new_records = [
-                record for record in data 
-                if record.get('id') not in existing_ids
-            ]
-            
-            if not new_records:
-                logger.info(
-                    "No new records to insert",
-                    table_id=table_id
-                )
-                return
-                
-            logger.info(
-                "Found new records to insert",
-                table_id=table_id,
-                total_records=len(data),
-                new_records=len(new_records)
-            )
-
-            # Configure job
-            job_config = bigquery.LoadJobConfig(
-                schema=[
-                    bigquery.SchemaField(
-                        name=field['name'],
-                        field_type=field['type'],
-                        mode=field['mode']
-                    ) for field in schema
-                ],
-                write_disposition=write_disposition,
-                source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON
-            )
-
-            # Convert filtered data to newline-delimited JSON
-            nl_json = '\n'.join(json.dumps(record) for record in new_records)
-
-            # Load data
-            table_ref = f"{self.project_id}.{self.dataset_id}.{table_id}"
-            job = self.client.load_table_from_file(
-                io.StringIO(nl_json),
-                table_ref,
-                job_config=job_config
-            )
-            job.result()  # Wait for job to complete
-
-            logger.info(
-                "Successfully loaded new data into BigQuery",
-                table_id=table_id,
-                row_count=len(new_records)
-            )
-
+            logger.info("Created BigQuery dataset", dataset_id=self.dataset_id)
         except Exception as e:
             logger.error(
-                "Failed to load data into BigQuery",
+                "Failed to access or create BigQuery dataset",
+                error=str(e),
+                dataset_id=self.dataset_id
+            )
+            raise
+
+    def _create_schema_field(self, field_def: Dict) -> bigquery.SchemaField:
+        field_name = field_def['name']
+        field_type = field_def['type']
+        field_mode = field_def.get('mode', 'NULLABLE')
+
+        if field_type == 'RECORD' and 'fields' in field_def:
+            sub_fields = [self._create_schema_field(f) for f in field_def['fields']]
+            return bigquery.SchemaField(name=field_name, field_type=field_type, mode=field_mode, fields=sub_fields)
+        else:
+            return bigquery.SchemaField(name=field_name, field_type=field_type, mode=field_mode)
+
+    def load_data_from_gcs(self, table_id: str, schema: List[Dict], source_uris: List[str]):
+        """Load data from GCS files into BigQuery table."""
+        try:
+            full_table_id = f"{self.project_id}.{self.dataset_id}.{table_id}"
+            
+            # Create schema
+            bq_schema = [self._create_schema_field(field) for field in schema]
+            
+            job_config = bigquery.LoadJobConfig(
+                source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+                schema=bq_schema,
+                write_disposition="WRITE_TRUNCATE",
+                ignore_unknown_values=True
+            )
+
+            load_job = self.client.load_table_from_uri(
+                source_uris,
+                full_table_id,
+                job_config=job_config
+            )
+
+            # Wait for job completion
+            load_job.result()
+
+            if load_job.errors:
+                logger.error(
+                    "BigQuery load job failed",
+                    errors=load_job.errors,
+                    table_id=full_table_id
+                )
+                raise Exception(f"Load job failed: {load_job.errors}")
+
+            logger.info(
+                "Successfully loaded data to BigQuery",
+                table_id=full_table_id,
+                input_files=load_job.input_files,
+                input_bytes=load_job.input_file_bytes,
+                output_rows=load_job.output_rows
+            )
+
+        except bigquery.BadRequest as e:
+            logger.error(
+                "Bad request error during BigQuery load",
+                error=str(e),
+                table_id=table_id,
+                source_uris=source_uris
+            )
+            raise
+        except NotFound as e:
+            logger.error(
+                "BigQuery table or dataset not found",
+                error=str(e),
+                table_id=table_id
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                "Failed to load data to BigQuery",
                 error=str(e),
                 table_id=table_id
             )
