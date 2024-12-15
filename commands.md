@@ -6,7 +6,7 @@ docker run \
   -v $(pwd)/credentials/credentials.json:/app/credentials/credentials.json:ro \
   -e GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/credentials.json \
   -e PYTHONPATH=/app \
-  -e USER_ID=hiqFpAjAOufOLkUB3WKUl5sOAYE3 \
+  -e USER_ID=UYL7W9kaSsYFIFMPzbJoYoHADb33 \
   vmhub-pipeline:local
 ```
 
@@ -18,7 +18,3 @@ docker run \
 chmod +x scripts/deploy.sh
 ./scripts/deploy.sh
 ```
-
-
-docker build -t us-central1-docker.pkg.dev/your-project-id/your-repo/vmhub-data-pipeline:latest .
-docker push us-central1-docker.pkg.dev/your-project-id/your-repo/vmhub-data-pipeline:latest

@@ -3,6 +3,7 @@
 from typing import Dict, List
 from google.cloud import bigquery
 import structlog
+from google.api_core.exceptions import NotFound
 
 logger = structlog.get_logger()
 
@@ -18,14 +19,15 @@ class BigQueryHelper:
         try:
             self.client.get_dataset(dataset_ref)
             logger.info("BigQuery dataset exists", dataset_id=self.dataset_id)
-        except bigquery.NotFound:
+        except NotFound:
+            # If dataset doesn't exist, create it
             dataset = bigquery.Dataset(dataset_ref)
             dataset.location = "US"
             self.client.create_dataset(dataset, exists_ok=True)
-            logger.info("created BigQuery dataset", dataset_id=self.dataset_id)
+            logger.info("Created BigQuery dataset", dataset_id=self.dataset_id)
         except Exception as e:
             logger.error(
-                "failed to access or create BigQuery dataset",
+                "Failed to access or create BigQuery dataset",
                 error=str(e),
                 dataset_id=self.dataset_id
             )
@@ -43,7 +45,7 @@ class BigQueryHelper:
             return bigquery.SchemaField(name=field_name, field_type=field_type, mode=field_mode)
 
     def load_data_from_gcs(self, table_id: str, schema: List[Dict], source_uris: List[str]):
-        """load data from GCS files into BigQuery table."""
+        """Load data from GCS files into BigQuery table."""
         try:
             full_table_id = f"{self.project_id}.{self.dataset_id}.{table_id}"
             
@@ -56,13 +58,6 @@ class BigQueryHelper:
                 write_disposition="WRITE_TRUNCATE",
                 ignore_unknown_values=True
             )
-
-            # # log the URIs we're loading from
-            # logger.info(
-            #     "starting BigQuery load",
-            #     table_id=full_table_id,
-            #     source_uris=source_uris
-            # )
 
             load_job = self.client.load_table_from_uri(
                 source_uris,
@@ -82,7 +77,7 @@ class BigQueryHelper:
                 raise Exception(f"Load job failed: {load_job.errors}")
 
             logger.info(
-                "successfully loaded data to BigQuery",
+                "Successfully loaded data to BigQuery",
                 table_id=full_table_id,
                 input_files=load_job.input_files,
                 input_bytes=load_job.input_file_bytes,
@@ -97,7 +92,7 @@ class BigQueryHelper:
                 source_uris=source_uris
             )
             raise
-        except bigquery.NotFound as e:
+        except NotFound as e:
             logger.error(
                 "BigQuery table or dataset not found",
                 error=str(e),
@@ -106,7 +101,7 @@ class BigQueryHelper:
             raise
         except Exception as e:
             logger.error(
-                "failed to load data to BigQuery",
+                "Failed to load data to BigQuery",
                 error=str(e),
                 table_id=table_id
             )
