@@ -22,7 +22,7 @@ echo "configuring docker authentication for artifact registry..."
 gcloud auth configure-docker ${REGION}-docker.pkg.dev
 
 echo "building docker image..."
-docker build -t ${IMAGE_NAME}:${TAG} .
+docker build --platform linux/amd64 -t ${IMAGE_NAME}:${TAG} .
 
 echo "tagging image for artifact registry..."
 docker tag ${IMAGE_NAME}:${TAG} ${ARTIFACT_REGISTRY_URI}
