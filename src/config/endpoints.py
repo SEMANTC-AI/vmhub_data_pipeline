@@ -17,7 +17,7 @@ class Endpoint:
     end_date: Optional[datetime] = None
 
     def get_daily_ranges(self) -> Generator[tuple[datetime, datetime], None, None]:
-        """Generate daily date ranges from start_date to end_date"""
+        """generate daily date ranges from start_date to end_date"""
         if not self.requires_date_range or not self.start_date:
             return
 
@@ -25,9 +25,9 @@ class Endpoint:
         end_date = self.end_date or datetime.now(pytz.UTC)
 
         while current_date <= end_date:
-            # Set time to start of day
+            # set time to start of day
             day_start = datetime.combine(current_date.date(), time.min, tzinfo=pytz.UTC)
-            # Set time to end of day
+            # set time to end of day
             day_end = datetime.combine(current_date.date(), time.max, tzinfo=pytz.UTC)
             
             yield (day_start, day_end)
@@ -61,7 +61,7 @@ class VMHubEndpoints:
     LAVANDERIAS = Endpoint(
         name='lavanderias',
         path='lavanderias',
-        page_size=1000,  # Can be large as there are typically few lavanderias
+        page_size=1000,  # can be large as there are typically few lavanderias
         schema_file='lavanderias.json'
     )
     

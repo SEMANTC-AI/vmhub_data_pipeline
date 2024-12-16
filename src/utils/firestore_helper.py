@@ -7,7 +7,7 @@ logger = structlog.get_logger()
 
 def get_customer_data(user_id: str):
     """
-    Fetch vmhubToken and cnpj from Firestore path:
+    fetch vmhubToken and cnpj from Firestore path:
     /users/{user_id}/config/settings
     """
     db = firestore.Client()
@@ -15,7 +15,7 @@ def get_customer_data(user_id: str):
     settings_doc = settings_ref.get()
 
     if not settings_doc.exists:
-        raise ValueError(f"No Firestore document found at /users/{user_id}/config/settings")
+        raise ValueError(f"no Firestore document found at /users/{user_id}/config/settings")
 
     data = settings_doc.to_dict()
     vmhub_token = data.get('vmhubToken')
@@ -24,5 +24,5 @@ def get_customer_data(user_id: str):
     if not vmhub_token or not cnpj:
         raise ValueError("Firestore document at /config/settings is missing 'vmhubToken' or 'cnpj'")
 
-    logger.info("Fetched customer data from Firestore", user_id=user_id, cnpj=cnpj)
+    logger.info("fetched customer data from Firestore", user_id=user_id, cnpj=cnpj)
     return vmhub_token, cnpj

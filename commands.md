@@ -10,10 +10,6 @@ docker run \
   vmhub-pipeline:local
 ```
 
-
-
-
-<!-- RUN THE BUILD: -->
 ```
 chmod +x scripts/deploy.sh
 ./scripts/deploy.sh

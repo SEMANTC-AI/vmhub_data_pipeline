@@ -3,7 +3,7 @@
 from typing import Dict, List
 from google.cloud import bigquery
 import structlog
-from google.api_core.exceptions import NotFound
+from google.api_core import exceptions  # Changed import
 
 logger = structlog.get_logger()
 
@@ -19,15 +19,15 @@ class BigQueryHelper:
         try:
             self.client.get_dataset(dataset_ref)
             logger.info("BigQuery dataset exists", dataset_id=self.dataset_id)
-        except NotFound:
-            # If dataset doesn't exist, create it
+        except exceptions.NotFound:  # Changed from NotFound
+            # if dataset doesn't exist, create it
             dataset = bigquery.Dataset(dataset_ref)
             dataset.location = "US"
             self.client.create_dataset(dataset, exists_ok=True)
-            logger.info("Created BigQuery dataset", dataset_id=self.dataset_id)
+            logger.info("created BigQuery dataset", dataset_id=self.dataset_id)
         except Exception as e:
             logger.error(
-                "Failed to access or create BigQuery dataset",
+                "failed to access or create BigQuery dataset",
                 error=str(e),
                 dataset_id=self.dataset_id
             )
@@ -45,11 +45,11 @@ class BigQueryHelper:
             return bigquery.SchemaField(name=field_name, field_type=field_type, mode=field_mode)
 
     def load_data_from_gcs(self, table_id: str, schema: List[Dict], source_uris: List[str]):
-        """Load data from GCS files into BigQuery table."""
+        """load data from GCS files into BigQuery table."""
         try:
             full_table_id = f"{self.project_id}.{self.dataset_id}.{table_id}"
             
-            # Create schema
+            # create schema
             bq_schema = [self._create_schema_field(field) for field in schema]
             
             job_config = bigquery.LoadJobConfig(
@@ -65,7 +65,7 @@ class BigQueryHelper:
                 job_config=job_config
             )
 
-            # Wait for job completion
+            # wait for job completion
             load_job.result()
 
             if load_job.errors:
@@ -77,22 +77,22 @@ class BigQueryHelper:
                 raise Exception(f"Load job failed: {load_job.errors}")
 
             logger.info(
-                "Successfully loaded data to BigQuery",
+                "successfully loaded data to BigQuery",
                 table_id=full_table_id,
                 input_files=load_job.input_files,
                 input_bytes=load_job.input_file_bytes,
                 output_rows=load_job.output_rows
             )
 
-        except bigquery.BadRequest as e:
+        except exceptions.BadRequest as e:  # Changed from bigquery.BadRequest
             logger.error(
-                "Bad request error during BigQuery load",
+                "bad request error during BigQuery load",
                 error=str(e),
                 table_id=table_id,
                 source_uris=source_uris
             )
             raise
-        except NotFound as e:
+        except exceptions.NotFound as e:  # Changed from NotFound
             logger.error(
                 "BigQuery table or dataset not found",
                 error=str(e),
@@ -101,7 +101,7 @@ class BigQueryHelper:
             raise
         except Exception as e:
             logger.error(
-                "Failed to load data to BigQuery",
+                "failed to load data to BigQuery",
                 error=str(e),
                 table_id=table_id
             )

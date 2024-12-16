@@ -48,9 +48,9 @@ def process_pages_for_date_range(
     start_date: Optional[datetime],
     end_date: Optional[datetime]
 ) -> bool:
-    """Process all pages for a specific date range sequentially with robust error handling."""
+    """process all pages for a specific date range sequentially with robust error handling"""
     any_data_fetched = False
-    page = 1
+    page = 0
     max_retries = 3
     original_page_size = endpoint.page_size
 
