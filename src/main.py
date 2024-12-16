@@ -322,6 +322,8 @@ def main():
         formatted_cnpj = format_cnpj(settings.VMHUB_CNPJ)
         gcs_helper = GCSHelper(project_id=settings.GCP_PROJECT_ID, bucket_name=settings.GCS_BUCKET_NAME)
         bq_helper = BigQueryHelper(project_id=settings.GCP_PROJECT_ID, dataset_id=f"CNPJ_{formatted_cnpj}_RAW")
+        # create message history table
+        bq_helper.create_message_history_table(formatted_cnpj)
 
         endpoints = VMHubEndpoints.get_all()
 

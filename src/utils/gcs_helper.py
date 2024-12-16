@@ -207,7 +207,7 @@ class GCSHelper:
             blobs = self.client.list_blobs(self.bucket, prefix=prefix)
             dates = []
             for blob in blobs:
-                # Expecting blobs like CNPJ_48986168000144/vendas/20230717/response_pg0.json
+                # expecting blobs like CNPJ_48986168000144/vendas/20230717/response_pg0.json
                 parts = blob.name.split('/')
                 if len(parts) >= 3:
                     date_str = parts[2]
@@ -215,13 +215,13 @@ class GCSHelper:
                         date = datetime.strptime(date_str, '%Y%m%d').replace(tzinfo=pytz.UTC)
                         dates.append(date)
                     except ValueError:
-                        logger.warning("Invalid date format in blob name", blob_name=blob.name)
+                        logger.warning("invalid date format in blob name", blob_name=blob.name)
             if dates:
                 latest_date = max(dates)
-                logger.info("Latest processed date found", latest_date=latest_date.isoformat())
+                logger.info("latest processed date found", latest_date=latest_date.isoformat())
                 return latest_date
             else:
-                logger.info("No processed dates found for endpoint", endpoint=endpoint)
+                logger.info("no processed dates found for endpoint", endpoint=endpoint)
                 return None
         except exceptions.GoogleAPIError as e:
             logger.error(
