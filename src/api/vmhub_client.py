@@ -14,11 +14,11 @@ class VMHubAPIError(Exception):
     pass
 
 class NoMoreDataError(Exception):
-    """Indicates no more data is available from the API"""
+    """indicates no more data is available from the API"""
     pass
 
 class VMHubClient:
-    """Client to interact with VMHub API"""
+    """client to interact with VMHub API"""
     def __init__(
         self, 
         base_url: str, 
@@ -68,18 +68,18 @@ class VMHubClient:
                 )
                 # Specific handling for certain status codes
                 if status_code == 404:
-                    logger.error("Endpoint not found", endpoint=endpoint)
-                    raise VMHubAPIError(f"Endpoint not found: {endpoint}")
+                    logger.error("endpoint not found", endpoint=endpoint)
+                    raise VMHubAPIError(f"endpoint not found: {endpoint}")
                 elif status_code == 429:
                     logger.warning("Rate limited by API", retry_number=current_retry)
                 elif status_code >= 500 and params and params.get('pagina', 0) > 0:
                     logger.warning("500 error indicating no more data",
                                    page=params.get('pagina'), endpoint=endpoint)
-                    raise NoMoreDataError("No more data available.")
+                    raise NoMoreDataError("no more data available.")
                 current_retry += 1
             except requests.exceptions.RequestException as e:
                 logger.warning(
-                    "Request exception during API call",
+                    "request exception during API call",
                     url=url,
                     params=params,
                     error=str(e)
@@ -93,7 +93,7 @@ class VMHubClient:
             # Exponential backoff with jitter
             jitter = uniform(0, 0.1 * current_backoff)
             sleep_time = min(current_backoff + jitter, self.max_backoff)
-            logger.warning("Request failed, retrying", 
+            logger.warning("request failed, retrying", 
                            retry_number=current_retry, 
                            backoff_time=sleep_time,
                            url=url, 
@@ -128,13 +128,13 @@ class VMHubClient:
                 'dataInicio': date_start.strftime('%Y-%m-%dT%H:%M:%SZ'),
                 'dataTermino': date_end.strftime('%Y-%m-%dT%H:%M:%SZ'),
                 'somenteSucesso': str(somente_sucesso).lower()
-            })  # <-- Added missing closing parenthesis here
+            })
 
         response_data = self._make_request_with_backoff('GET', endpoint, params=params)
         
         if not isinstance(response_data, list):
             logger.error("unexpected response format", response=response_data)
-            raise VMHubAPIError("Unexpected response format")
+            raise VMHubAPIError("unexpected response format")
 
         logger.info("fetched data", endpoint=endpoint, cnpj=cnpj, page=page, record_count=len(response_data))
         return response_data

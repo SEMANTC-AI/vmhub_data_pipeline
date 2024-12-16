@@ -23,7 +23,7 @@ def format_cnpj(cnpj: str) -> str:
     return cnpj.replace('.', '').replace('/', '').replace('-', '')
 
 def get_storage_path(cnpj: str, endpoint: str, page: int, date_start: Optional[datetime] = None) -> str:
-    """Generate storage path for data files"""
+    """generate storage path for data files"""
     if endpoint == 'vendas' and date_start:
         date_str = date_start.strftime('%Y%m%d')
         return f"CNPJ_{cnpj}/{endpoint}/{date_str}/response_pg{page}.json"
@@ -31,7 +31,7 @@ def get_storage_path(cnpj: str, endpoint: str, page: int, date_start: Optional[d
         return f"CNPJ_{cnpj}/{endpoint}/response_pg{page}.json"
 
 def enrich_data(records: List[Dict], gcs_uri: str) -> List[Dict]:
-    """Add metadata to records"""
+    """add metadata to records"""
     ingestion_ts = datetime.utcnow().isoformat() + "Z"
     for rec in records:
         rec['gcs_uri'] = gcs_uri
@@ -68,8 +68,8 @@ def process_pages_for_date_range(
                 )
 
                 if not data:
-                    logger.info("No more data returned", page=page, endpoint=endpoint.name)
-                    return any_data_fetched  # Stop fetching further pages
+                    logger.info("no more data returned", page=page, endpoint=endpoint.name)
+                    return any_data_fetched  # stop fetching further pages
 
                 storage_path = get_storage_path(
                     cnpj=formatted_cnpj,
@@ -83,36 +83,36 @@ def process_pages_for_date_range(
 
                 any_data_fetched = True
                 page += 1
-                time.sleep(0.5)  # Optional: Adjust delay as needed
-                break  # Successful fetch, move to next page
+                time.sleep(0.5)  # optional: adjust delay as needed
+                break  # successful fetch, move to next page
 
             except VMHubAPIError as e:
                 retries += 1
                 logger.warning(
-                    "Failed to fetch page",
+                    "failed to fetch page",
                     error=str(e),
                     page=page,
                     endpoint=endpoint.name,
                     attempt=retries
                 )
-                time.sleep(2 ** retries)  # Exponential backoff
+                time.sleep(2 ** retries)  # exponential backoff
 
             except Exception as e:
                 retries += 1
                 logger.error(
-                    "Unexpected error processing page",
+                    "unexpected error processing page",
                     error=str(e),
                     page=page,
                     endpoint=endpoint.name,
                     attempt=retries
                 )
-                time.sleep(2 ** retries)  # Exponential backoff
+                time.sleep(2 ** retries)  # exponential backoff
 
         else:
-            # After max retries for this page
+            # after max retries for this page
             if endpoint.name == 'clientes':
                 logger.info(
-                    "Max retries reached. Attempting individual records.",
+                    "max retries reached... attempting individual records",
                     endpoint=endpoint.name,
                     page=page
                 )
@@ -143,19 +143,19 @@ def process_pages_for_date_range(
                             gcs_helper.upload_json(data=enriched_data, blob_name=storage_path)
                             any_data_fetched = True
                             logger.info(
-                                "Fetched and uploaded individual record",
+                                "fetched and uploaded individual record",
                                 endpoint=endpoint.name,
                                 record=individual_record
                             )
                         else:
                             logger.info(
-                                "No data returned for individual record",
+                                "no data returned for individual record",
                                 endpoint=endpoint.name,
                                 record=individual_record
                             )
                     except VMHubAPIError as e:
                         logger.warning(
-                            "Failed to fetch individual record",
+                            "failed to fetch individual record",
                             error=str(e),
                             endpoint=endpoint.name,
                             record=individual_record
@@ -163,7 +163,7 @@ def process_pages_for_date_range(
                         continue
                     except Exception as e:
                         logger.error(
-                            "Unexpected error fetching individual record",
+                            "unexpected error fetching individual record",
                             error=str(e),
                             endpoint=endpoint.name,
                             record=individual_record
@@ -171,7 +171,7 @@ def process_pages_for_date_range(
                         continue
             else:
                 logger.warning(
-                    "Max retries reached. Skipping page.",
+                    "max retries reached. Skipping page.",
                     endpoint=endpoint.name,
                     page=page
                 )
@@ -187,7 +187,7 @@ def process_endpoint(
     bq_helper: BigQueryHelper,
     formatted_cnpj: str
 ) -> None:
-    logger.info("Processing endpoint", endpoint=endpoint.name)
+    logger.info("processing endpoint", endpoint=endpoint.name)
     any_data_processed = False
 
     if endpoint.requires_date_range:
@@ -196,14 +196,14 @@ def process_endpoint(
             if latest_date:
                 start_date = latest_date
                 logger.info(
-                    "Resuming from latest processed date",
+                    "resuming from latest processed date",
                     endpoint=endpoint.name,
                     start_date=start_date.date().isoformat()
                 )
             else:
                 start_date = datetime.now(pytz.UTC) - timedelta(days=2*365)
                 logger.info(
-                    "No existing data found. Starting from 2 years ago",
+                    "no existing data found. Starting from 2 years ago",
                     endpoint=endpoint.name,
                     start_date=start_date.date().isoformat()
                 )
@@ -223,7 +223,7 @@ def process_endpoint(
             end_date=end_date
         ).get_daily_ranges():
             logger.info(
-                "Processing date",
+                "processing date",
                 endpoint=endpoint.name,
                 date=current_start_date.date().isoformat()
             )
@@ -243,7 +243,7 @@ def process_endpoint(
                 time.sleep(1.0)
             except Exception as e:
                 logger.error(
-                    "Error processing date",
+                    "error processing date",
                     endpoint=endpoint.name,
                     date=current_start_date.date().isoformat(),
                     error=str(e)
@@ -255,7 +255,7 @@ def process_endpoint(
             source_uris = gcs_helper.get_all_file_uris(prefix)
             if source_uris:
                 logger.info(
-                    "Loading files to BigQuery",
+                    "loading files to BigQuery",
                     endpoint=endpoint.name,
                     file_count=len(source_uris)
                 )
@@ -266,7 +266,7 @@ def process_endpoint(
                     source_uris=source_uris
                 )
             else:
-                logger.warning("No files found for loading", endpoint=endpoint.name)
+                logger.warning("no files found for loading", endpoint=endpoint.name)
     else:
         data_fetched = process_pages_for_date_range(
             endpoint=endpoint,
@@ -282,7 +282,7 @@ def process_endpoint(
             source_uris = gcs_helper.get_all_file_uris(prefix)
             if source_uris:
                 logger.info(
-                    "Loading files to BigQuery",
+                    "loading files to BigQuery",
                     endpoint=endpoint.name,
                     file_count=len(source_uris)
                 )
@@ -293,14 +293,14 @@ def process_endpoint(
                     source_uris=source_uris
                 )
             else:
-                logger.warning("No files found for loading", endpoint=endpoint.name)
+                logger.warning("no files found for loading", endpoint=endpoint.name)
 
 def main():
     try:
         # Fetch the user_id from environment or another source
         user_id = os.getenv('USER_ID')
         if not user_id:
-            raise ValueError("Missing USER_ID environment variable")
+            raise ValueError("missing USER_ID environment variable")
 
         # Get credentials from Firestore
         vmhub_token, cnpj = get_customer_data(user_id)
@@ -325,7 +325,6 @@ def main():
 
         endpoints = VMHubEndpoints.get_all()
 
-        # Example: concurrency for vendas and clientes
         with ThreadPoolExecutor(max_workers=2) as executor:
             future_to_endpoint = {
                 executor.submit(
@@ -336,7 +335,7 @@ def main():
                     gcs_helper=gcs_helper,
                     bq_helper=bq_helper,
                     formatted_cnpj=formatted_cnpj
-                ): endpoint for endpoint in endpoints if endpoint.name in ['vendas', 'clientes']
+                ): endpoint for endpoint in endpoints if endpoint.name in ['vendas', 'clientes', 'maquinas', 'lavanderias']
             }
 
             for future in as_completed(future_to_endpoint):
@@ -345,13 +344,13 @@ def main():
                     future.result()
                 except Exception as e:
                     logger.error(
-                        "Error processing endpoint",
+                        "error processing endpoint",
                         endpoint=endpoint.name,
                         error=str(e)
                     )
 
     except Exception as e:
-        logger.error("Error in main execution", error=str(e))
+        logger.error("error in main execution", error=str(e))
         raise
 
 if __name__ == "__main__":
